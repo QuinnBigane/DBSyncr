@@ -1,0 +1,11 @@
+Item Name,Product Code,Unit Price,Stock Level,Category,Vendor
+Widget A,SKU001,10.99,95,Electronics,Supplier1
+Widget B,SKU002,15.5,80,Electronics,Supplier1
+Gadget C,SKU003,25.0,45,Tools,Supplier2
+Tool D,SKU004,8.75,190,Tools,Supplier2
+Device E,SKU005,30.25,30,Electronics,Supplier3
+Controller F,SKU006,45.0,60,Electronics,Supplier3
+Sensor G,SKU007,12.5,120,Components,Supplier1
+Cable H,SKU008,5.25,300,Accessories,Supplier2
+Battery I,SKU009,18.75,150,Components,Supplier1
+Adapter J,SKU010,22.0,80,Accessories,Supplier3

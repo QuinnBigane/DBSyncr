@@ -1,0 +1,50 @@
+{
+  "database_names": {
+    "db1_name": "TestDatabase1",
+    "db2_name": "TestDatabase2"
+  },
+  "field_mappings": {
+    "Product Name to Item Name": {
+      "db1_field": "Product Name",
+      "db2_field": "Item Name",
+      "direction": "bidirectional",
+      "description": "Maps Product Name to Item Name for test data",
+      "data_type": "string",
+      "validation_rules": null
+    },
+    "Price Mapping": {
+      "db1_field": "Price",
+      "db2_field": "Unit Price",
+      "direction": "bidirectional",
+      "description": "Maps Price to Unit Price for test data",
+      "data_type": "float",
+      "validation_rules": null
+    },
+    "Quantity Mapping": {
+      "db1_field": "Quantity",
+      "db2_field": "Stock Level",
+      "direction": "bidirectional",
+      "description": "Maps Quantity to Stock Level for test data",
+      "data_type": "integer",
+      "validation_rules": null
+    }
+  },
+  "data_sources": {
+    "db1": {
+      "file_path": "tests/test_data/db1_5_items.csv",
+      "file_type": "csv",
+      "name": "Test Database 1",
+      "description": "5 item test dataset for DB1"
+    },
+    "db2": {
+      "file_path": "tests/test_data/db2_10_items.csv",
+      "file_type": "csv",
+      "name": "Test Database 2",
+      "description": "10 item test dataset for DB2"
+    }
+  },
+  "primary_link": {
+    "db1": "SKU",
+    "db2": "Product Code"
+  }
+}

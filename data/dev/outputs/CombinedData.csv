@@ -1,0 +1,11 @@
+TestDatabase1_Product Name,TestDatabase1_Key,TestDatabase1_Price,TestDatabase1_Quantity,NormalizedKey,TestDatabase2_Item Name,TestDatabase2_Key,TestDatabase2_Unit Price,TestDatabase2_Stock Level,TestDatabase2_Category,TestDatabase2_Vendor
+Widget A,SKU001,10.99,100.0,SKU001,Widget A,SKU001,10.99,95,Electronics,Supplier1
+Widget B,SKU002,15.5,75.0,SKU002,Widget B,SKU002,15.5,80,Electronics,Supplier1
+Gadget C,SKU003,25.0,50.0,SKU003,Gadget C,SKU003,25.0,45,Tools,Supplier2
+Tool D,SKU004,8.75,200.0,SKU004,Tool D,SKU004,8.75,190,Tools,Supplier2
+Device E,SKU005,30.25,25.0,SKU005,Device E,SKU005,30.25,30,Electronics,Supplier3
+,,,,SKU006,Controller F,SKU006,45.0,60,Electronics,Supplier3
+,,,,SKU007,Sensor G,SKU007,12.5,120,Components,Supplier1
+,,,,SKU008,Cable H,SKU008,5.25,300,Accessories,Supplier2
+,,,,SKU009,Battery I,SKU009,18.75,150,Components,Supplier1
+,,,,SKU010,Adapter J,SKU010,22.0,80,Accessories,Supplier3
