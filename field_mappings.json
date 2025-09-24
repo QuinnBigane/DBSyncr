@@ -1,0 +1,42 @@
+{
+  "database_names": {
+    "db1_name": "netsuite",
+    "db2_name": "shopify"
+  },
+  "field_mappings": {
+    "Weight": {
+      "db1_field": "Weight",
+      "db2_field": "Variant Weight",
+      "direction": "bidirectional",
+      "description": "Maps Weight to Variant Weight",
+      "data_type": null,
+      "validation_rules": null
+    },
+    "Purchase Price": {
+      "db1_field": "Purchase Price",
+      "db2_field": "Variant Cost",
+      "direction": "bidirectional",
+      "description": "Maps Purchase Price to Variant Cost",
+      "data_type": null,
+      "validation_rules": null
+    }
+  },
+  "data_sources": {
+    "db1": {
+      "file_path": "C:/Directory/DBSyncr/input_data/NetSuite_TestData.xlsx",
+      "file_type": "excel",
+      "name": null,
+      "description": null
+    },
+    "db2": {
+      "file_path": "C:/Directory/DBSyncr/input_data/Shopify_TestData.xlsx",
+      "file_type": "excel",
+      "name": null,
+      "description": null
+    }
+  },
+  "primary_link": {
+    "db1": "SKU",
+    "db2": "Variant SKU"
+  }
+}

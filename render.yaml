@@ -1,0 +1,48 @@
+version: "1"
+
+services:
+  - type: web
+    name: ups-data-manager-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py api --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DEBUG
+        value: false
+      - key: API_HOST
+        value: 0.0.0.0
+      - key: LOG_LEVEL
+        value: INFO
+      - key: SECRET_KEY
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: MAX_UPLOAD_SIZE
+        value: 52428800  # 50MB
+      - key: DATA_DIR
+        value: /opt/render/project/data
+      - key: INPUT_DIR
+        value: /opt/render/project/input_data
+      - key: OUTPUT_DIR
+        value: /opt/render/project/output_data
+      - key: LOGS_DIR
+        value: /opt/render/project/logs
+      - key: EXPORTS_DIR
+        value: /opt/render/project/exports
+      - key: BACKUPS_DIR
+        value: /opt/render/project/backups
+    
+    # Health check configuration
+    healthCheckPath: /health
+    
+    # Auto-deploy from main branch
+    autoDeploy: true
+    
+    # Environment
+    runtime: python-3.11
+    
+    # Disk space for file uploads and processing
+    disk:
+      name: ups-data-disk
+      mountPath: /opt/render/project/data
+      sizeGB: 1
