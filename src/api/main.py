@@ -129,26 +129,26 @@ async def get_data_summary(service: DataService = Depends(get_data_service)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post(f"{settings.api_prefix}/data/upload/netsuite", response_model=UploadResponse)
-async def upload_netsuite_file(
+@app.post(f"{settings.api_prefix}/data/upload/db1", response_model=UploadResponse)
+async def upload_db1_file(
     file: UploadFile = File(...),
     service: DataService = Depends(get_data_service)
 ):
-    """Upload NetSuite data file."""
-    return await _handle_file_upload(file, "netsuite", service)
+    """Upload Database 1 data file."""
+    return await _handle_file_upload(file, "db1", service)
 
 
-@app.post(f"{settings.api_prefix}/data/upload/shopify", response_model=UploadResponse)
-async def upload_shopify_file(
+@app.post(f"{settings.api_prefix}/data/upload/db2", response_model=UploadResponse)
+async def upload_db2_file(
     file: UploadFile = File(...),
     service: DataService = Depends(get_data_service)
 ):
-    """Upload Shopify data file."""
-    return await _handle_file_upload(file, "shopify", service)
+    """Upload Database 2 data file."""
+    return await _handle_file_upload(file, "db2", service)
 
 
 async def _handle_file_upload(file: UploadFile, data_type: str, service: DataService):
-    """Handle file upload for NetSuite or Shopify data."""
+    """Handle file upload for database files."""
     try:
         # Validate file type
         file_extension = Path(file.filename).suffix.lower()
@@ -169,14 +169,14 @@ async def _handle_file_upload(file: UploadFile, data_type: str, service: DataSer
             shutil.copyfileobj(file.file, buffer)
         
         # Load data based on type
-        if data_type == "netsuite":
-            service.load_data_from_files(netsuite_file=str(file_path))
-        elif data_type == "shopify":
-            service.load_data_from_files(shopify_file=str(file_path))
+        if data_type == "db1":
+            service.load_data_from_files(db1_file=str(file_path))
+        elif data_type == "db2":
+            service.load_data_from_files(db2_file=str(file_path))
         
         return UploadResponse(
             success=True,
-            message=f"{data_type.title()} file uploaded and processed successfully",
+            message=f"{data_type.upper()} file uploaded and processed successfully",
             filename=filename,
             file_path=str(file_path)
         )
@@ -186,23 +186,23 @@ async def _handle_file_upload(file: UploadFile, data_type: str, service: DataSer
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.get(f"{settings.api_prefix}/data/netsuite")
-async def get_netsuite_data(
+@app.get(f"{settings.api_prefix}/data/db1")
+async def get_db1_data(
     page: int = 1,
     limit: int = 100,
     service: DataService = Depends(get_data_service)
 ):
-    """Get NetSuite data with pagination."""
+    """Get Database 1 data with pagination."""
     try:
-        if service.netsuite_data is None:
-            raise DataProcessingError("NetSuite data not loaded")
+        if service.db1_data is None:
+            raise DataProcessingError("Database 1 data not loaded")
         
         # Calculate pagination
         start_idx = (page - 1) * limit
         end_idx = start_idx + limit
         
-        total_records = len(service.netsuite_data)
-        data_slice = service.netsuite_data.iloc[start_idx:end_idx]
+        total_records = len(service.db1_data)
+        data_slice = service.db1_data.iloc[start_idx:end_idx]
         
         return {
             "success": True,
@@ -216,27 +216,27 @@ async def get_netsuite_data(
         }
         
     except Exception as e:
-        logger.error(f"Failed to get NetSuite data: {e}")
+        logger.error(f"Failed to get Database 1 data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get(f"{settings.api_prefix}/data/shopify")
-async def get_shopify_data(
+@app.get(f"{settings.api_prefix}/data/db2")
+async def get_db2_data(
     page: int = 1,
     limit: int = 100,
     service: DataService = Depends(get_data_service)
 ):
-    """Get Shopify data with pagination."""
+    """Get Database 2 data with pagination."""
     try:
-        if service.shopify_data is None:
-            raise DataProcessingError("Shopify data not loaded")
+        if service.db2_data is None:
+            raise DataProcessingError("Database 2 data not loaded")
         
         # Calculate pagination
         start_idx = (page - 1) * limit
         end_idx = start_idx + limit
         
-        total_records = len(service.shopify_data)
-        data_slice = service.shopify_data.iloc[start_idx:end_idx]
+        total_records = len(service.db2_data)
+        data_slice = service.db2_data.iloc[start_idx:end_idx]
         
         return {
             "success": True,
@@ -250,7 +250,7 @@ async def get_shopify_data(
         }
         
     except Exception as e:
-        logger.error(f"Failed to get Shopify data: {e}")
+        logger.error(f"Failed to get Database 2 data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -1,7 +1,14 @@
 # Development dependencies
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
+pytest-xdist>=3.3.0          # Parallel test execution
+pytest-html>=3.2.0           # HTML test reports
+pytest-cov>=4.1.0            # Coverage reporting
+pytest-mock>=3.11.0          # Enhanced mocking
+pytest-timeout>=2.1.0        # Test timeouts
+pytest-randomly>=3.13.0      # Random test execution order
 httpx>=0.24.0
+requests>=2.31.0              # HTTP client for API testing
 black>=23.0.0
 isort>=5.12.0
 flake8>=6.0.0
@@ -10,3 +17,6 @@ mypy>=1.5.0
 # Testing utilities
 factory-boy>=3.3.0
 faker>=19.0.0
+responses>=0.23.0             # HTTP request mocking
+freezegun>=1.2.0              # Time mocking
+parameterized>=0.9.0          # Parameterized tests

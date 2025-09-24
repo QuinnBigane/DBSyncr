@@ -22,7 +22,7 @@
     },
     "Quantity Mapping": {
       "db1_field": "Quantity",
-      "db2_field": "Stock Level",
+      "db2_field": "Stock Level", 
       "direction": "bidirectional",
       "description": "Maps Quantity to Stock Level for test data",
       "data_type": "integer",
@@ -39,7 +39,7 @@
     "db2": {
       "file_path": "tests/test_data/db2_10_items.csv",
       "file_type": "csv",
-      "name": "Test Database 2",
+      "name": "Test Database 2", 
       "description": "10 item test dataset for DB2"
     }
   },

@@ -77,22 +77,47 @@ class DataService:
         try:
             # Use configured file paths if not provided
             if not db1_file and self.field_mappings:
-                db1_file = self.field_mappings.data_sources.get("db1", {}).file_path
+                try:
+                    if hasattr(self.field_mappings.data_sources, 'get'):
+                        # It's a dictionary
+                        db1_source = self.field_mappings.data_sources.get("db1", {})
+                        if hasattr(db1_source, 'file_path'):
+                            db1_file = db1_source.file_path
+                        else:
+                            db1_file = db1_source.get("file_path")
+                    else:
+                        # It might be a direct DataSource object
+                        db1_file = getattr(self.field_mappings.data_sources, 'db1', {}).get('file_path')
+                except (AttributeError, TypeError):
+                    self.logger.warning("Could not access db1 data source configuration")
+                    
             if not db2_file and self.field_mappings:
-                db2_file = self.field_mappings.data_sources.get("db2", {}).file_path
+                try:
+                    if hasattr(self.field_mappings.data_sources, 'get'):
+                        # It's a dictionary
+                        db2_source = self.field_mappings.data_sources.get("db2", {})
+                        if hasattr(db2_source, 'file_path'):
+                            db2_file = db2_source.file_path
+                        else:
+                            db2_file = db2_source.get("file_path")
+                    else:
+                        # It might be a direct DataSource object  
+                        db2_file = getattr(self.field_mappings.data_sources, 'db2', {}).get('file_path')
+                except (AttributeError, TypeError):
+                    self.logger.warning("Could not access db2 data source configuration")
             
             # Load Database 1 data
             if db1_file and os.path.exists(db1_file):
                 self.db1_data = self._load_file(db1_file)
                 self.logger.info(f"Loaded {self.db1_name} data: {len(self.db1_data)} records")
-            else:
+            elif db1_file:
                 self.logger.warning(f"{self.db1_name} file not found: {db1_file}")
             
             # Load Database 2 data
             if db2_file and os.path.exists(db2_file):
                 self.db2_data = self._load_file(db2_file)
                 self.logger.info(f"Loaded {self.db2_name} data: {len(self.db2_data)} records")
-            else:
+            elif db2_file:
                 self.logger.warning(f"{self.db2_name} file not found: {db2_file}")
             
             # Combine data if both are loaded
@@ -111,7 +136,7 @@ class DataService:
         file_path = Path(file_path)
         
         if not file_path.exists():
-            raise FileNotFoundError(f"File not found: {file_path}")
+            raise DataProcessingError(f"File not found: {file_path}")
         
         try:
             if file_path.suffix.lower() in ['.xlsx', '.xls']:
@@ -119,10 +144,13 @@ class DataService:
             elif file_path.suffix.lower() == '.csv':
                 return pd.read_csv(file_path)
             else:
-                raise DataValidationError(f"Unsupported file format: {file_path.suffix}")
+                raise DataProcessingError(f"Unsupported file format: {file_path.suffix}")
                 
         except Exception as e:
-            raise DataProcessingError(f"Failed to load file {file_path}: {e}")
+            if "No data" in str(e):
+                raise DataProcessingError(f"Error reading file {file_path}: {e}")
+            else:
+                raise DataProcessingError(f"Failed to load file {file_path}: {e}")
     
     def _combine_data(self):
         """Combine database data based on linking configuration."""
@@ -290,17 +318,17 @@ class DataService:
         """Export data to file."""
         try:
             # Select data to export
-            if data_type == "netsuite":
-                data = self.netsuite_data
-                default_name = f"{self.db1_name}Data"
-            elif data_type == "shopify":
-                data = self.shopify_data
-                default_name = f"{self.db2_name}Data"
+            if data_type == "db1":
+                data = self.db1_data
+                default_name = f"{self.db1_name.replace(' ', '')}Data"
+            elif data_type == "db2":
+                data = self.db2_data
+                default_name = f"{self.db2_name.replace(' ', '')}Data"
             elif data_type == "combined":
                 data = self.combined_data
                 default_name = "CombinedData"
             else:
-                raise DataValidationError(f"Invalid data type: {data_type}")
+                raise DataValidationError(f"Invalid data type: {data_type}. Must be 'db1', 'db2', or 'combined'")
             
             if data is None:
                 raise DataProcessingError(f"No {data_type} data available for export")
@@ -309,7 +337,12 @@ class DataService:
             if not file_path:
                 exports_dir = self.config_manager.get_absolute_path(self.config_manager.settings.exports_dir)
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                file_path = exports_dir / f"{default_name}_{timestamp}.{format}"
+                filename = f"{default_name}_{timestamp}.{format}"
+                file_path = str(exports_dir / filename)
+            elif not os.path.isabs(file_path):
+                # Make relative paths absolute
+                exports_dir = self.config_manager.get_absolute_path(self.config_manager.settings.exports_dir)
+                file_path = str(exports_dir / file_path)
             
             # Export based on format
             if format.lower() == "csv":
@@ -330,14 +363,14 @@ class DataService:
         """Update a specific record."""
         try:
             # Select data to update
-            if data_type == "netsuite":
-                data = self.netsuite_data
-            elif data_type == "shopify":
-                data = self.shopify_data
+            if data_type == "db1":
+                data = self.db1_data
+            elif data_type == "db2":
+                data = self.db2_data
             elif data_type == "combined":
                 data = self.combined_data
             else:
-                raise DataValidationError(f"Invalid data type: {data_type}")
+                raise DataValidationError(f"Invalid data type: {data_type}. Must be 'db1', 'db2', or 'combined'")
             
             if data is None:
                 raise DataProcessingError(f"No {data_type} data available")
@@ -363,15 +396,17 @@ class DataService:
     def get_data_summary(self) -> Dict[str, Any]:
         """Get summary statistics for all loaded data."""
         summary = {
-            "netsuite": {
-                "loaded": self.netsuite_data is not None,
-                "records": len(self.netsuite_data) if self.netsuite_data is not None else 0,
-                "columns": list(self.netsuite_data.columns) if self.netsuite_data is not None else []
+            "db1": {
+                "name": self.db1_name,
+                "loaded": self.db1_data is not None,
+                "records": len(self.db1_data) if self.db1_data is not None else 0,
+                "columns": list(self.db1_data.columns) if self.db1_data is not None else []
             },
-            "shopify": {
-                "loaded": self.shopify_data is not None,
-                "records": len(self.shopify_data) if self.shopify_data is not None else 0,
-                "columns": list(self.shopify_data.columns) if self.shopify_data is not None else []
+            "db2": {
+                "name": self.db2_name,
+                "loaded": self.db2_data is not None,
+                "records": len(self.db2_data) if self.db2_data is not None else 0,
+                "columns": list(self.db2_data.columns) if self.db2_data is not None else []
             },
             "combined": {
                 "loaded": self.combined_data is not None,

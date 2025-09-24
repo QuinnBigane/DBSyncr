@@ -106,7 +106,11 @@ class ConfigManager:
             # Return default configuration
             return self._get_default_field_mappings()
         except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in field mappings file: {e}")
+            # Log warning and return default configuration
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Invalid JSON in field mappings file: {e}. Using default mappings.")
+            return self._get_default_field_mappings()
     
     def save_field_mappings(self, mappings: Dict[str, Any]):
         """Save field mappings to configuration file."""
