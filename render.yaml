@@ -5,12 +5,17 @@ services:
     name: dbsyncr-api
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python main.py api --host 0.0.0.0 --port $PORT
+    startCommand: python main.py api
     envVars:
       - key: DEBUG
         value: false
       - key: API_HOST
         value: 0.0.0.0
+      - key: PORT
+        fromService:
+          type: web
+          name: dbsyncr-api
+          property: port
       - key: LOG_LEVEL
         value: INFO
       - key: SECRET_KEY

@@ -5,8 +5,20 @@ __pycache__/
 
 
 # Data files - keep folder structure but ignore contents
-data/*
+data/**/*.*
 !data/.gitkeep
+!data/api/.gitkeep
+!data/api/config/.gitkeep
+!data/api/incoming/.gitkeep
+!data/api/processing/.gitkeep
+!data/api/results/.gitkeep
+!data/dev/.gitkeep
+!data/dev/config/.gitkeep
+!data/dev/inputs/.gitkeep
+!data/dev/outputs/.gitkeep
+!data/dev/samples/.gitkeep
+
+# Legacy data directories - keep folder structure but ignore contents
 input_data/*
 !input_data/.gitkeep
 output_data/*

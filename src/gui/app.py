@@ -6,7 +6,8 @@ Thread-safe version with graceful shutdown support.
 import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
-from backend_wrapper import DataBackend
+from services.data_service import DataService
+from services.service_factory import ServiceFactory
 
 
 class DBSyncrGUI:
@@ -14,12 +15,16 @@ class DBSyncrGUI:
     
     def __init__(self, backend=None, on_close_callback=None):
         self.root = tk.Tk()
-        self.backend = backend if backend is not None else DataBackend()
+        self.backend = backend if backend is not None else ServiceFactory.create_data_service()
         self.on_close_callback = on_close_callback
         
         # Threading attributes
         self.is_shutting_down = False
         self.shutdown_lock = threading.Lock()
+        
+        # Loading state
+        self.loading_count = 0
+        self.loading_indicator = None
         
         # Page containers
         self.pages = {}
@@ -148,45 +153,103 @@ class DBSyncrGUI:
     
     def initialize_data(self):
         """Initialize the backend data."""
-        try:
-            success, message = self.backend.load_data()
-            
-            # Always load pages regardless of data loading result
-            self.load_pages()
-            
-            if success:
-                self.update_status("Data loaded successfully")
-            else:
-                self.update_status(f"Data loading warning: {message}")
-                
-        except Exception as e:
-            self.update_status(f"Error during initialization: {str(e)}")
-            # Still try to load pages for basic functionality
-            self.load_pages()
+        def _init_worker():
+            try:
+                self.show_loading("Loading data...")
+                success, message = self.backend.load_data()
+
+                # Always load pages regardless of data loading result
+                self.load_pages()
+
+                if success:
+                    self.update_status("Data loaded successfully")
+                else:
+                    self.update_status(f"Data loading warning: {message}")
+
+            except Exception as e:
+                self.update_status(f"Error during initialization: {str(e)}")
+                # Still try to load pages for basic functionality
+                self.load_pages()
+            finally:
+                self.hide_loading()
+
+        # Run in thread to avoid blocking UI
+        threading.Thread(target=_init_worker, daemon=True).start()
     
     def update_status(self, message):
         """Update the status bar with a message."""
         if hasattr(self, 'status_var'):
             self.status_var.set(str(message))
             self.root.update_idletasks()
+
+    def show_loading(self, message="Loading..."):
+        """Show loading indicator."""
+        self.loading_count += 1
+        if self.loading_count == 1:  # First loading operation
+            self._create_loading_indicator(message)
+        else:
+            # Update message if already showing
+            if self.loading_indicator:
+                self.loading_indicator.config(text=message)
+
+    def hide_loading(self):
+        """Hide loading indicator."""
+        self.loading_count = max(0, self.loading_count - 1)
+        if self.loading_count == 0 and self.loading_indicator:
+            self.loading_indicator.destroy()
+            self.loading_indicator = None
+
+    def _create_loading_indicator(self, message):
+        """Create the loading indicator widget."""
+        if self.loading_indicator:
+            return
+
+        # Create a top-level loading window
+        self.loading_indicator = tk.Toplevel(self.root)
+        self.loading_indicator.title("Loading")
+        self.loading_indicator.geometry("300x100")
+        self.loading_indicator.resizable(False, False)
+        self.loading_indicator.transient(self.root)
+        self.loading_indicator.grab_set()
+
+        # Center on parent
+        self.loading_indicator.geometry("+{}+{}".format(
+            self.root.winfo_x() + self.root.winfo_width() // 2 - 150,
+            self.root.winfo_y() + self.root.winfo_height() // 2 - 50
+        ))
+
+        # Content
+        frame = ttk.Frame(self.loading_indicator, padding=20)
+        frame.pack(fill='both', expand=True)
+
+        ttk.Label(frame, text=message, font=('Arial', 10)).pack(pady=(0, 10))
+        self.progress_bar = ttk.Progressbar(frame, mode='indeterminate')
+        self.progress_bar.pack(fill='x')
+        self.progress_bar.start(10)
     
     def reload_data(self):
         """Reload data from files."""
-        try:
-            self.update_status("Reloading data...")
-            success, message = self.backend.load_data()
-            
-            # Refresh all pages
-            self.refresh_pages()
-            
-            if success:
-                self.update_status("Data reloaded successfully")
-            else:
-                self.update_status(f"Data reload warning: {message}")
-                
-        except Exception as e:
-            self.update_status(f"Error reloading data: {str(e)}")
-            messagebox.showerror("Error", f"Failed to reload data: {str(e)}")
+        def _reload_worker():
+            try:
+                self.show_loading("Reloading data...")
+                success, message = self.backend.load_data()
+
+                # Refresh all pages
+                self.refresh_pages()
+
+                if success:
+                    self.update_status("Data reloaded successfully")
+                else:
+                    self.update_status(f"Data reload warning: {message}")
+
+            except Exception as e:
+                self.update_status(f"Error reloading data: {str(e)}")
+                messagebox.showerror("Error", f"Failed to reload data: {str(e)}")
+            finally:
+                self.hide_loading()
+
+        # Run in thread to avoid blocking UI
+        threading.Thread(target=_reload_worker, daemon=True).start()
     
     def refresh_pages(self):
         """Refresh all loaded pages."""
@@ -203,7 +266,7 @@ class DBSyncrGUI:
         about_text = """DBSyncr - Professional Edition
         
 A simplified data management application for handling
-NetSuite and Shopify product data.
+product data synchronization between two databases.
 
 Features:
 • Bulk data editing and management

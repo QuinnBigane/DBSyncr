@@ -33,12 +33,97 @@ class Settings(BaseSettings):
         if "PORT" in os.environ:
             self.api_port = int(os.environ["PORT"])
     
-    # File paths
+    # File paths - base directory
     data_dir: str = Field(default="data", env="DATA_DIR")
     input_dir: str = Field(default="input_data", env="INPUT_DIR")
     output_dir: str = Field(default="output_data", env="OUTPUT_DIR")
-    logs_dir: str = Field(default="logs", env="LOGS_DIR")
     exports_dir: str = Field(default="exports", env="EXPORTS_DIR")
+    
+    @property
+    def api_input_dir(self) -> str:
+        """API input directory path."""
+        return f"{self.data_dir}/api/incoming"
+
+    @api_input_dir.setter
+    def api_input_dir(self, value: str):
+        # Set data_dir to the parent of api/incoming
+        if value.endswith("/api/incoming"):
+            self.data_dir = value[:-len("/api/incoming")]
+        else:
+            self.data_dir = value
+    
+    @property
+    def api_output_dir(self) -> str:
+        """API output directory path."""
+        return f"{self.data_dir}/api/results"
+
+    @api_output_dir.setter
+    def api_output_dir(self, value: str):
+        if value.endswith("/api/results"):
+            self.data_dir = value[:-len("/api/results")]
+        else:
+            self.data_dir = value
+    
+    @property
+    def api_config_dir(self) -> str:
+        """API config directory path."""
+        return f"{self.data_dir}/api/config"
+
+    @api_config_dir.setter
+    def api_config_dir(self, value: str):
+        if value.endswith("/api/config"):
+            self.data_dir = value[:-len("/api/config")]
+        else:
+            self.data_dir = value
+    
+    @property
+    def dev_input_dir(self) -> str:
+        """Dev input directory path."""
+        return f"{self.data_dir}/dev/inputs"
+
+    @dev_input_dir.setter
+    def dev_input_dir(self, value: str):
+        if value.endswith("/dev/inputs"):
+            self.data_dir = value[:-len("/dev/inputs")]
+        else:
+            self.data_dir = value
+    
+    @property
+    def dev_output_dir(self) -> str:
+        """Dev output directory path."""
+        return f"{self.data_dir}/dev/outputs"
+
+    @dev_output_dir.setter
+    def dev_output_dir(self, value: str):
+        if value.endswith("/dev/outputs"):
+            self.data_dir = value[:-len("/dev/outputs")]
+        else:
+            self.data_dir = value
+    
+    @property
+    def dev_samples_dir(self) -> str:
+        """Dev samples directory path."""
+        return f"{self.data_dir}/dev/samples"
+
+    @dev_samples_dir.setter
+    def dev_samples_dir(self, value: str):
+        if value.endswith("/dev/samples"):
+            self.data_dir = value[:-len("/dev/samples")]
+        else:
+            self.data_dir = value
+    
+    @property
+    def config_dir(self) -> str:
+        """Config directory path."""
+        return f"{self.data_dir}/dev/config"
+
+    @config_dir.setter
+    def config_dir(self, value: str):
+        if value.endswith("/dev/config"):
+            self.data_dir = value[:-len("/dev/config")]
+        else:
+            self.data_dir = value
+    logs_dir: str = Field(default="logs", env="LOGS_DIR")
     backups_dir: str = Field(default="backups", env="BACKUPS_DIR")
     
     # Database settings (for future use)
@@ -73,7 +158,7 @@ class ConfigManager:
     def __init__(self, config_file: Optional[str] = None):
         self.settings = Settings()
         self.project_root = Path(__file__).parent.parent.parent
-        self.config_file = config_file or self.project_root / "field_mappings.json"
+        self.config_file = config_file or self.project_root / self.settings.config_dir / "field_mappings.json"
         
         # Ensure directories exist
         self._create_directories()
@@ -82,10 +167,14 @@ class ConfigManager:
         """Create necessary directories if they don't exist."""
         dirs_to_create = [
             self.settings.data_dir,
-            self.settings.input_dir,
-            self.settings.output_dir,
+            self.settings.api_input_dir,
+            self.settings.api_output_dir,
+            self.settings.api_config_dir,
+            self.settings.dev_input_dir,
+            self.settings.dev_output_dir,
+            self.settings.dev_samples_dir,
+            self.settings.config_dir,
             self.settings.logs_dir,
-            self.settings.exports_dir,
             self.settings.backups_dir
         ]
         
@@ -121,42 +210,42 @@ class ConfigManager:
         """Get default field mappings configuration."""
         return {
             "database_names": {
-                "db1_name": "NetSuite",
-                "db2_name": "Shopify"
+                "db1_name": "Database 1",
+                "db2_name": "Database 2"
             },
             "field_mappings": {
                 "Weight": {
-                    "netsuite_field": "Weight",
-                    "shopify_field": "Variant Weight",
+                    "db1_field": "Weight",
+                    "db2_field": "Variant Weight",
                     "direction": "bidirectional",
                     "description": "Maps Weight to Variant Weight"
                 },
                 "Purchase Price": {
-                    "netsuite_field": "Purchase Price",
-                    "shopify_field": "Variant Cost",
+                    "db1_field": "Purchase Price",
+                    "db2_field": "Variant Cost",
                     "direction": "bidirectional",
                     "description": "Maps Purchase Price to Variant Cost"
                 },
-                "Shopify (sp)": {
-                    "netsuite_field": "Shopify (sp)",
-                    "shopify_field": "Variant Price",
+                "Database 2 (sp)": {
+                    "db1_field": "Database 2 (sp)",
+                    "db2_field": "Variant Price",
                     "direction": "bidirectional",
-                    "description": "Maps Shopify (sp) to Variant Price"
+                    "description": "Maps Database 2 (sp) to Variant Price"
                 }
             },
             "data_sources": {
-                "netsuite": {
-                    "file_path": str(self.get_absolute_path("input_data/NetSuite_TestData.xlsx")),
+                "db1": {
+                    "file_path": str(self.get_absolute_path("data/dev/inputs/Database1_TestData.xlsx")),
                     "file_type": "excel"
                 },
-                "shopify": {
-                    "file_path": str(self.get_absolute_path("input_data/Shopify_TestData.xlsx")),
+                "db2": {
+                    "file_path": str(self.get_absolute_path("data/dev/inputs/Database2_TestData.xlsx")),
                     "file_type": "excel"
                 }
             },
             "primary_link": {
-                "netsuite": "SKU",
-                "shopify": "Variant SKU"
+                "db1": "SKU",
+                "db2": "Variant SKU"
             }
         }
 

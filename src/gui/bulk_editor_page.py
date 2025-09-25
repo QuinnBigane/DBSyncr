@@ -8,6 +8,8 @@ import pandas as pd
 import numpy as np
 from typing import Optional, Dict, Any, List
 from .colored_table_view import ColoredTableView
+from services.service_factory import ServiceFactory
+from services.filter_service import StatusFilter
 
 
 class BulkEditorPage:
@@ -17,7 +19,10 @@ class BulkEditorPage:
         self.parent = parent
         self.backend = backend
         self.update_status = status_callback
-        
+
+        # Get services
+        self.filter_service = ServiceFactory.create_filter_service()
+
         # Get database names from backend
         if self.backend and hasattr(self.backend, 'get_database_names'):
             self.db1_name, self.db2_name = self.backend.get_database_names()
@@ -192,7 +197,7 @@ class BulkEditorPage:
         self.table_view.get_frame().pack(fill='both', expand=True)
         
         # Set field mappings for color coding and merged headers
-        field_mappings = self.backend.get_field_mappings_config()
+        field_mappings = self.backend.get_field_mappings()
         self.table_view.set_field_mappings(field_mappings)
         
         # Initialize column visibility for ALL database fields
@@ -1042,64 +1047,60 @@ class BulkEditorPage:
         self.populate_table()
     
     def apply_filters(self):
-        """Apply search and filter criteria."""
-        if self.backend.get_combined_data() is None:
-            return
-        
-        # Start with all data
-        filtered_data = self.backend.get_combined_data().copy()
-        
-        # Filter to show only matched records (items that exist in both databases)
-        # With the fixed merge logic, matched items will have both key columns populated
-        db1_key_col = f'{self.db1_name}_Key'
-        db2_key_col = f'{self.db2_name}_Key'
-        filtered_data = filtered_data[
-            filtered_data[db1_key_col].notna() & filtered_data[db2_key_col].notna()
-        ]
-        
-        # Apply search filter
-        search_text = self.search_var.get().strip()
-        if search_text:
-            filtered_data = filtered_data[filtered_data['NormalizedKey'].astype(str).str.contains(search_text, case=False, na=False)]
-        
-        # Apply status filter (now only applies to matched items)
-        status_filter = self.status_filter.get()
-        if status_filter != "All Matched":
-            # Find weight columns in the new structure using configured DB names
-            db1_weight_cols = [col for col in filtered_data.columns if col.startswith(f'{self.db1_name}_') and 'Weight' in col]
-            db2_weight_cols = [col for col in filtered_data.columns if col.startswith(f'{self.db2_name}_') and 'Weight' in col]
-            
-            if db1_weight_cols and db2_weight_cols:
-                db1_weight_col = db1_weight_cols[0]  # Use first weight column found
-                db2_weight_col = db2_weight_cols[0]  # Use first weight column found
-                
-                if status_filter == "NS Data Complete":
-                    # Show matched items where NetSuite has more complete data
-                    filtered_data = filtered_data[filtered_data[db1_weight_col].notna() & filtered_data[db2_weight_col].isna()]
-                elif status_filter == "SF Data Complete":
-                    # Show matched items where Shopify has more complete data  
-                    filtered_data = filtered_data[filtered_data[db2_weight_col].notna() & filtered_data[db1_weight_col].isna()]
-                elif status_filter == "Both Complete":
-                    # Show matched items where both systems have weight data (fully populated)
-                    filtered_data = filtered_data[filtered_data[db1_weight_col].notna() & filtered_data[db2_weight_col].notna()]
-        
-        # Apply hide synced data filter
-        if self.hide_synced_data.get():
-            # Hide rows where both NetSuite and Shopify have the same data
-            filtered_data = self._filter_out_synced_data(filtered_data)
-        
-        # Store filtered data and reset pagination
-        self.filtered_data = filtered_data
-        self.total_filtered_items = len(filtered_data)
-        self.current_page = 0
-        
-        # Update display
-        self.populate_table()
-        self.update_pagination_controls()
-        
-        # Update status
-        total_records = len(self.backend.get_combined_data()) if self.backend.get_combined_data() is not None else 0
-        self.update_status(f"Showing matched SKUs: {self.total_filtered_items} of {total_records} total records")
+        """Apply search and filter criteria using FilterService."""
+        # Map status filter string to enum
+        status_filter_map = {
+            "All Matched": StatusFilter.ALL_MATCHED,
+            "NS Data Complete": StatusFilter.DB1_COMPLETE,
+            "SF Data Complete": StatusFilter.DB2_COMPLETE,
+            "Both Complete": StatusFilter.BOTH_COMPLETE
+        }
+
+        status_filter = status_filter_map.get(self.status_filter.get(), StatusFilter.ALL_MATCHED)
+
+        # Get visible columns
+        visible_columns = []
+        for col, var in self.column_vars.items():
+            if var.get():
+                visible_columns.append(col)
+
+        # Apply filters using service with loading indicator
+        def _filter_worker():
+            try:
+                # Show loading on parent GUI
+                if hasattr(self.parent, 'show_loading'):
+                    self.parent.show_loading("Applying filters...")
+
+                self.filtered_data = self.filter_service.apply_filters(
+                    search_text=self.search_var.get().strip(),
+                    status_filter=status_filter,
+                    hide_synced_data=self.hide_synced_data.get(),
+                    visible_columns=visible_columns
+                )
+
+                # Store pagination info
+                self.total_filtered_items = len(self.filtered_data)
+                self.current_page = 0
+
+                # Update display
+                self.populate_table()
+                self.update_pagination_controls()
+
+                # Update status
+                total_records = len(self.backend.get_combined_data()) if self.backend.get_combined_data() is not None else 0
+                self.update_status(f"Showing matched SKUs: {self.total_filtered_items} of {total_records} total records")
+
+            except Exception as e:
+                self.update_status(f"Error applying filters: {str(e)}")
+                messagebox.showerror("Filter Error", f"Failed to apply filters: {str(e)}")
+            finally:
+                # Hide loading on parent GUI
+                if hasattr(self.parent, 'hide_loading'):
+                    self.parent.hide_loading()
+
+        # Run filtering in thread to avoid blocking UI
+        import threading
+        threading.Thread(target=_filter_worker, daemon=True).start()
 
     def _normalize_text_series(self, s: pd.Series) -> pd.Series:
         """Normalize a series to trimmed lowercase strings with NaN/None treated as empty."""
@@ -1187,26 +1188,7 @@ class BulkEditorPage:
         
         return sku if sku else None
     
-    def _filter_out_synced_data(self, data):
-        """Filter out rows where NetSuite and Shopify data is synchronized, based ONLY on visible columns."""
-        pairs = self._get_visible_comparable_pairs(data)
-        sync_conditions = []
-        for left_col, right_col in pairs:
-            left_missing = data[left_col].isna() | self._normalize_text_series(data[left_col]).eq("")
-            right_missing = data[right_col].isna() | self._normalize_text_series(data[right_col]).eq("")
-            equal = self._series_equal_with_tolerance(data[left_col], data[right_col])
-            condition = left_missing | right_missing | (~equal)
-            sync_conditions.append(condition)
 
-        if not sync_conditions:
-            # Nothing comparable is visible; don't filter out anything
-            return data
-
-        combined_condition = sync_conditions[0]
-        for condition in sync_conditions[1:]:
-            combined_condition = combined_condition | condition
-        return data[combined_condition]
-    
     def next_page(self):
         """Navigate to next page."""
         if self.filtered_data is None:

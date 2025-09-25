@@ -44,7 +44,7 @@
     }
   },
   "primary_link": {
-    "db1": "SKU",
-    "db2": "Product Code"
+    "db1": "sku",
+    "db2": "product code"
   }
 }

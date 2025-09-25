@@ -6,26 +6,30 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from typing import Dict, Any
 import os
+from services.service_factory import ServiceFactory
 
 
 class FieldMappingsPage:
     """Field mappings page for managing data field relationships."""
-    
+
     def __init__(self, parent, backend, status_callback):
         self.parent = parent
         self.backend = backend
         self.update_status = status_callback
-        
+
+        # Get services
+        self.config_service = ServiceFactory.create_configuration_service()
+
         # Get database names from backend
         if self.backend and hasattr(self.backend, 'get_database_names'):
             self.db1_name, self.db2_name = self.backend.get_database_names()
         else:
             self.db1_name, self.db2_name = "Database 1", "Database 2"
-        
+
         # Current mappings
         self.current_mappings = {}
         self.available_fields = {'db1': [], 'db2': []}
-        
+
         # Create main frame
         self.frame = ttk.Frame(parent)
         self.setup_interface()
@@ -382,14 +386,14 @@ class FieldMappingsPage:
         """Save the database names configuration."""
         db1_name = self.db1_name_var.get().strip()
         db2_name = self.db2_name_var.get().strip()
-        
+
         if not db1_name or not db2_name:
             messagebox.showwarning("Missing Names", "Please provide names for both databases.")
             return
-        
+
         try:
-            # Update the backend configuration
-            success = self.backend.update_database_names(db1_name, db2_name)
+            # Save using configuration service
+            success = self.config_service.save_database_names(db1_name, db2_name)
             if success:
                 self.db1_name = db1_name
                 self.db2_name = db2_name
@@ -524,17 +528,16 @@ class FieldMappingsPage:
     def load_available_fields(self):
         """Load available fields from both systems."""
         try:
-            # Get fields from backend
-            db1_fields = self.backend.get_available_db1_fields()
-            db2_fields = self.backend.get_available_db2_fields()
-            
+            # Get fields from configuration service
+            available_fields = self.config_service.get_available_fields(self.backend)
+
             # Populate comboboxes
-            self.ns_linking_combo['values'] = db1_fields
-            self.ns_field_combo['values'] = db1_fields
-            
-            self.sf_linking_combo['values'] = db2_fields
-            self.sf_field_combo['values'] = db2_fields
-            
+            self.ns_linking_combo['values'] = available_fields.get('db1', [])
+            self.ns_field_combo['values'] = available_fields.get('db1', [])
+
+            self.sf_linking_combo['values'] = available_fields.get('db2', [])
+            self.sf_field_combo['values'] = available_fields.get('db2', [])
+
         except Exception as e:
             # Fallback to empty lists
             self.ns_linking_combo['values'] = []
@@ -567,19 +570,17 @@ class FieldMappingsPage:
             self.linking_status_var.set("Error loading linking configuration")
     
     def load_database_names(self):
-        """Load database names from backend configuration."""
+        """Load database names from configuration service."""
         try:
-            # Get database names from backend
-            if hasattr(self.backend, 'db1_name') and hasattr(self.backend, 'db2_name'):
-                self.db1_name = self.backend.db1_name
-                self.db2_name = self.backend.db2_name
-                
-                # Update the UI variables
-                if hasattr(self, 'db1_name_var'):
-                    self.db1_name_var.set(self.db1_name)
-                if hasattr(self, 'db2_name_var'):
-                    self.db2_name_var.set(self.db2_name)
-                    
+            # Get database names from configuration service
+            self.db1_name, self.db2_name = self.config_service.load_database_names()
+
+            # Update the UI variables
+            if hasattr(self, 'db1_name_var'):
+                self.db1_name_var.set(self.db1_name)
+            if hasattr(self, 'db2_name_var'):
+                self.db2_name_var.set(self.db2_name)
+
         except Exception as e:
             # Use defaults if loading fails
             self.db1_name = "Database 1"

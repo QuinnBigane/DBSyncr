@@ -9,7 +9,7 @@ from typing import Optional, Dict, List, Tuple
 
 
 class UnmatchedItemsPage:
-    """Page for analyzing unmatched items between NetSuite and Shopify."""
+    """Page for analyzing unmatched items between databases."""
     
     def __init__(self, parent, backend, update_status_callback):
         self.parent = parent
@@ -25,73 +25,73 @@ class UnmatchedItemsPage:
         self.frame = ttk.Frame(parent)
         
         # Data storage
-        self.netsuite_only: Optional[pd.DataFrame] = None
-        self.shopify_only: Optional[pd.DataFrame] = None
+        self.db1_only: Optional[pd.DataFrame] = None
+        self.db2_only: Optional[pd.DataFrame] = None
         self.matched_items: Optional[pd.DataFrame] = None
         
         # UI Components
         self.stats_vars = {}
-        self.netsuite_tree = None
-        self.shopify_tree = None
+        self.db1_tree = None
+        self.db2_tree = None
         
         self.setup_interface()
         
     def extract_original_datasets_from_merged(self, combined_data):
-        """Extract original NetSuite and Shopify datasets from merged data using dynamic DB prefixes."""
+        """Extract original database datasets from merged data using dynamic DB prefixes."""
         try:
             prefix1 = f"{self.db1_name}_"
             prefix2 = f"{self.db2_name}_"
-            # Get DB1_ columns and rename them for NetSuite dataset
+            # Get DB1_ columns and rename them for database 1 dataset
             db1_cols = [col for col in combined_data.columns if col.startswith(prefix1)]
-            ns_data_dict = {}
+            db1_data_dict = {}
             
             # Extract DB1_ columns and remove prefix
             for col in db1_cols:
                 original_col = col[len(prefix1):]
-                ns_data_dict[original_col] = combined_data[col]
+                db1_data_dict[original_col] = combined_data[col]
             
             # Add the normalized key as well for reference
             if 'NormalizedKey' in combined_data.columns:
-                ns_data_dict['NormalizedKey'] = combined_data['NormalizedKey']
-            # Add system-specific Key as canonical 'Key' for NetSuite
-            ns_key_col = f"{self.db1_name}_Key"
-            if ns_key_col in combined_data.columns:
-                ns_data_dict['Key'] = combined_data[ns_key_col]
+                db1_data_dict['NormalizedKey'] = combined_data['NormalizedKey']
+            # Add system-specific Key as canonical 'Key' for database 1
+            db1_key_col = f"{self.db1_name}_Key"
+            if db1_key_col in combined_data.columns:
+                db1_data_dict['Key'] = combined_data[db1_key_col]
             
-            # Create NetSuite DataFrame efficiently
-            ns_data = pd.DataFrame(ns_data_dict)
+            # Create database 1 DataFrame efficiently
+            db1_data = pd.DataFrame(db1_data_dict)
             
-            # Filter out rows where all DB1_ columns are null (these are Shopify-only items)
+            # Filter out rows where all DB1_ columns are null (these are database 2-only items)
             if db1_cols:
-                ns_mask = combined_data[db1_cols].notna().any(axis=1)
-                ns_data = ns_data[ns_mask].reset_index(drop=True)
+                db1_mask = combined_data[db1_cols].notna().any(axis=1)
+                db1_data = db1_data[db1_mask].reset_index(drop=True)
             
-            # Get DB2_ columns and rename them for Shopify dataset
+            # Get DB2_ columns and rename them for database 2 dataset
             db2_cols = [col for col in combined_data.columns if col.startswith(prefix2)]
-            sf_data_dict = {}
+            db2_data_dict = {}
             
             # Extract DB2_ columns and remove prefix
             for col in db2_cols:
                 original_col = col[len(prefix2):]
-                sf_data_dict[original_col] = combined_data[col]
+                db2_data_dict[original_col] = combined_data[col]
             
             # Add the normalized key as well for reference
             if 'NormalizedKey' in combined_data.columns:
-                sf_data_dict['NormalizedKey'] = combined_data['NormalizedKey']
-            # Add system-specific Key as canonical 'Key' for Shopify
-            sf_key_col = f"{self.db2_name}_Key"
-            if sf_key_col in combined_data.columns:
-                sf_data_dict['Key'] = combined_data[sf_key_col]
+                db2_data_dict['NormalizedKey'] = combined_data['NormalizedKey']
+            # Add system-specific Key as canonical 'Key' for database 2
+            db2_key_col = f"{self.db2_name}_Key"
+            if db2_key_col in combined_data.columns:
+                db2_data_dict['Key'] = combined_data[db2_key_col]
             
-            # Create Shopify DataFrame efficiently
-            sf_data = pd.DataFrame(sf_data_dict)
+            # Create database 2 DataFrame efficiently
+            db2_data = pd.DataFrame(db2_data_dict)
             
-            # Filter out rows where all DB2_ columns are null (these are NetSuite-only items)
+            # Filter out rows where all DB2_ columns are null (these are database 1-only items)
             if db2_cols:
-                sf_mask = combined_data[db2_cols].notna().any(axis=1)
-                sf_data = sf_data[sf_mask].reset_index(drop=True)
+                db2_mask = combined_data[db2_cols].notna().any(axis=1)
+                db2_data = db2_data[db2_mask].reset_index(drop=True)
             
-            return ns_data, sf_data
+            return db1_data, db2_data
             
         except Exception as e:
             print(f"Error extracting original datasets: {e}")
@@ -175,20 +175,20 @@ class UnmatchedItemsPage:
         
         # Initialize statistics variables
         self.stats_vars = {
-            'total_netsuite': tk.StringVar(value="0"),
-            'total_shopify': tk.StringVar(value="0"),
+            'total_db1': tk.StringVar(value="0"),
+            'total_db2': tk.StringVar(value="0"),
             'matched': tk.StringVar(value="0"),
-            'netsuite_only': tk.StringVar(value="0"),
-            'shopify_only': tk.StringVar(value="0"),
+            'db1_only': tk.StringVar(value="0"),
+            'db2_only': tk.StringVar(value="0"),
             'match_rate': tk.StringVar(value="0%")
         }
         
         # Row 1: Totals
-        ttk.Label(stats_grid, text="Total NetSuite Items:").grid(row=0, column=0, sticky='w', padx=(0, 5))
-        ttk.Label(stats_grid, textvariable=self.stats_vars['total_netsuite'], font=('Arial', 10, 'bold')).grid(row=0, column=1, sticky='w', padx=(0, 20))
+        ttk.Label(stats_grid, text=f"Total {self.db1_name} Items:").grid(row=0, column=0, sticky='w', padx=(0, 5))
+        ttk.Label(stats_grid, textvariable=self.stats_vars['total_db1'], font=('Arial', 10, 'bold')).grid(row=0, column=1, sticky='w', padx=(0, 20))
         
-        ttk.Label(stats_grid, text="Total Shopify Items:").grid(row=0, column=2, sticky='w', padx=(0, 5))
-        ttk.Label(stats_grid, textvariable=self.stats_vars['total_shopify'], font=('Arial', 10, 'bold')).grid(row=0, column=3, sticky='w', padx=(0, 20))
+        ttk.Label(stats_grid, text=f"Total {self.db2_name} Items:").grid(row=0, column=2, sticky='w', padx=(0, 5))
+        ttk.Label(stats_grid, textvariable=self.stats_vars['total_db2'], font=('Arial', 10, 'bold')).grid(row=0, column=3, sticky='w', padx=(0, 20))
         
         # Row 2: Matches
         ttk.Label(stats_grid, text="Matched Items:").grid(row=1, column=0, sticky='w', padx=(0, 5), pady=(5, 0))
@@ -198,11 +198,11 @@ class UnmatchedItemsPage:
         ttk.Label(stats_grid, textvariable=self.stats_vars['match_rate'], font=('Arial', 10, 'bold'), foreground='green').grid(row=1, column=3, sticky='w', padx=(0, 20), pady=(5, 0))
         
         # Row 3: Unmatched
-        ttk.Label(stats_grid, text="NetSuite Only:").grid(row=2, column=0, sticky='w', padx=(0, 5), pady=(5, 0))
-        ttk.Label(stats_grid, textvariable=self.stats_vars['netsuite_only'], font=('Arial', 10, 'bold'), foreground='red').grid(row=2, column=1, sticky='w', padx=(0, 20), pady=(5, 0))
+        ttk.Label(stats_grid, text=f"{self.db1_name} Only:").grid(row=2, column=0, sticky='w', padx=(0, 5), pady=(5, 0))
+        ttk.Label(stats_grid, textvariable=self.stats_vars['db1_only'], font=('Arial', 10, 'bold'), foreground='red').grid(row=2, column=1, sticky='w', padx=(0, 20), pady=(5, 0))
         
-        ttk.Label(stats_grid, text="Shopify Only:").grid(row=2, column=2, sticky='w', padx=(0, 5), pady=(5, 0))
-        ttk.Label(stats_grid, textvariable=self.stats_vars['shopify_only'], font=('Arial', 10, 'bold'), foreground='red').grid(row=2, column=3, sticky='w', padx=(0, 20), pady=(5, 0))
+        ttk.Label(stats_grid, text=f"{self.db2_name} Only:").grid(row=2, column=2, sticky='w', padx=(0, 5), pady=(5, 0))
+        ttk.Label(stats_grid, textvariable=self.stats_vars['db2_only'], font=('Arial', 10, 'bold'), foreground='red').grid(row=2, column=3, sticky='w', padx=(0, 20), pady=(5, 0))
     
     def create_results_section(self, parent):
         """Create results section with tabbed interface."""
@@ -213,83 +213,83 @@ class UnmatchedItemsPage:
         self.notebook = ttk.Notebook(results_frame)
         self.notebook.pack(fill='both', expand=True)
         
-        # NetSuite Only tab
-        self.create_netsuite_only_tab()
+        # Database 1 Only tab
+        self.create_db1_only_tab()
         
-        # Shopify Only tab
-        self.create_shopify_only_tab()
+        # Database 2 Only tab
+        self.create_db2_only_tab()
     
-    def create_netsuite_only_tab(self):
-        """Create tab for items that exist only in NetSuite."""
-        ns_frame = ttk.Frame(self.notebook)
-        self.notebook.add(ns_frame, text="NetSuite Only")
+    def create_db1_only_tab(self):
+        """Create tab for items that exist only in database 1."""
+        db1_frame = ttk.Frame(self.notebook)
+        self.notebook.add(db1_frame, text=f"{self.db1_name} Only")
         
         # Search frame
-        search_frame = ttk.Frame(ns_frame)
+        search_frame = ttk.Frame(db1_frame)
         search_frame.pack(fill='x', pady=(0, 10))
         
         ttk.Label(search_frame, text="Search:").pack(side='left', padx=(0, 5))
-        self.ns_search_var = tk.StringVar()
-        ns_search_entry = ttk.Entry(search_frame, textvariable=self.ns_search_var, width=30)
-        ns_search_entry.pack(side='left', padx=(0, 10))
-        ns_search_entry.bind('<KeyRelease>', lambda e: self.filter_netsuite_results())
+        self.db1_search_var = tk.StringVar()
+        db1_search_entry = ttk.Entry(search_frame, textvariable=self.db1_search_var, width=30)
+        db1_search_entry.pack(side='left', padx=(0, 10))
+        db1_search_entry.bind('<KeyRelease>', lambda e: self.filter_db1_results())
         
-        ttk.Button(search_frame, text="Clear", command=lambda: self.clear_search('netsuite')).pack(side='left')
+        ttk.Button(search_frame, text="Clear", command=lambda: self.clear_search('db1')).pack(side='left')
         
-        # Treeview for NetSuite items
+        # Treeview for database 1 items
         columns = ('SKU',)
-        self.netsuite_tree = ttk.Treeview(ns_frame, columns=columns, show='headings', height=15)
+        self.db1_tree = ttk.Treeview(db1_frame, columns=columns, show='headings', height=15)
         
         # Configure columns
         for col in columns:
-            self.netsuite_tree.heading(col, text=col)
-            self.netsuite_tree.column(col, width=200, anchor='center')
+            self.db1_tree.heading(col, text=col)
+            self.db1_tree.column(col, width=200, anchor='center')
         
         # Scrollbars
-        ns_v_scroll = ttk.Scrollbar(ns_frame, orient='vertical', command=self.netsuite_tree.yview)
-        ns_h_scroll = ttk.Scrollbar(ns_frame, orient='horizontal', command=self.netsuite_tree.xview)
-        self.netsuite_tree.configure(yscrollcommand=ns_v_scroll.set, xscrollcommand=ns_h_scroll.set)
+        db1_v_scroll = ttk.Scrollbar(db1_frame, orient='vertical', command=self.db1_tree.yview)
+        db1_h_scroll = ttk.Scrollbar(db1_frame, orient='horizontal', command=self.db1_tree.xview)
+        self.db1_tree.configure(yscrollcommand=db1_v_scroll.set, xscrollcommand=db1_h_scroll.set)
         
         # Pack scrollbars first, then treeview
-        ns_v_scroll.pack(side='right', fill='y')
-        ns_h_scroll.pack(side='bottom', fill='x')
-        self.netsuite_tree.pack(side='left', fill='both', expand=True)
+        db1_v_scroll.pack(side='right', fill='y')
+        db1_h_scroll.pack(side='bottom', fill='x')
+        self.db1_tree.pack(side='left', fill='both', expand=True)
     
-    def create_shopify_only_tab(self):
-        """Create tab for items that exist only in Shopify."""
-        sf_frame = ttk.Frame(self.notebook)
-        self.notebook.add(sf_frame, text="Shopify Only")
+    def create_db2_only_tab(self):
+        """Create tab for items that exist only in database 2."""
+        db2_frame = ttk.Frame(self.notebook)
+        self.notebook.add(db2_frame, text=f"{self.db2_name} Only")
         
         # Search frame
-        search_frame = ttk.Frame(sf_frame)
+        search_frame = ttk.Frame(db2_frame)
         search_frame.pack(fill='x', pady=(0, 10))
         
         ttk.Label(search_frame, text="Search:").pack(side='left', padx=(0, 5))
-        self.sf_search_var = tk.StringVar()
-        sf_search_entry = ttk.Entry(search_frame, textvariable=self.sf_search_var, width=30)
-        sf_search_entry.pack(side='left', padx=(0, 10))
-        sf_search_entry.bind('<KeyRelease>', lambda e: self.filter_shopify_results())
+        self.db2_search_var = tk.StringVar()
+        db2_search_entry = ttk.Entry(search_frame, textvariable=self.db2_search_var, width=30)
+        db2_search_entry.pack(side='left', padx=(0, 10))
+        db2_search_entry.bind('<KeyRelease>', lambda e: self.filter_db2_results())
         
-        ttk.Button(search_frame, text="Clear", command=lambda: self.clear_search('shopify')).pack(side='left')
+        ttk.Button(search_frame, text="Clear", command=lambda: self.clear_search('db2')).pack(side='left')
         
-        # Treeview for Shopify items
+        # Treeview for database 2 items
         columns = ('SKU',)
-        self.shopify_tree = ttk.Treeview(sf_frame, columns=columns, show='headings', height=15)
+        self.db2_tree = ttk.Treeview(db2_frame, columns=columns, show='headings', height=15)
         
         # Configure columns
         for col in columns:
-            self.shopify_tree.heading(col, text=col)
-            self.shopify_tree.column(col, width=200, anchor='center')
+            self.db2_tree.heading(col, text=col)
+            self.db2_tree.column(col, width=200, anchor='center')
         
         # Scrollbars
-        sf_v_scroll = ttk.Scrollbar(sf_frame, orient='vertical', command=self.shopify_tree.yview)
-        sf_h_scroll = ttk.Scrollbar(sf_frame, orient='horizontal', command=self.shopify_tree.xview)
-        self.shopify_tree.configure(yscrollcommand=sf_v_scroll.set, xscrollcommand=sf_h_scroll.set)
+        db2_v_scroll = ttk.Scrollbar(db2_frame, orient='vertical', command=self.db2_tree.yview)
+        db2_h_scroll = ttk.Scrollbar(db2_frame, orient='horizontal', command=self.db2_tree.xview)
+        self.db2_tree.configure(yscrollcommand=db2_v_scroll.set, xscrollcommand=db2_h_scroll.set)
         
         # Pack scrollbars first, then treeview
-        sf_v_scroll.pack(side='right', fill='y')
-        sf_h_scroll.pack(side='bottom', fill='x')
-        self.shopify_tree.pack(side='left', fill='both', expand=True)
+        db2_v_scroll.pack(side='right', fill='y')
+        db2_h_scroll.pack(side='bottom', fill='x')
+        self.db2_tree.pack(side='left', fill='both', expand=True)
     
     def analyze_unmatched_items(self):
         """Analyze and find unmatched items between systems."""
@@ -305,14 +305,14 @@ class UnmatchedItemsPage:
                     pass
             
             if combined_data is None or combined_data.empty:
-                messagebox.showwarning("No Data", "Please load data first from both NetSuite and Shopify.")
+                messagebox.showwarning("No Data", f"Please load data first from both {self.db1_name} and {self.db2_name}.")
                 self.update_status("No data available for analysis")
                 return
             
             # Get primary link field configuration
             try:
-                ns_field, sf_field = self.backend.get_primary_link_field()
-                if not ns_field or not sf_field:
+                db1_field, db2_field = self.backend.get_primary_link_field()
+                if not db1_field or not db2_field:
                     messagebox.showerror("Configuration Error", "Primary link fields not configured. Please set up field mappings first.")
                     return
             except Exception as e:
@@ -320,54 +320,54 @@ class UnmatchedItemsPage:
                 return
             
             # Extract original datasets from merged structure
-            ns_data, sf_data = self.extract_original_datasets_from_merged(combined_data)
+            db1_data, db2_data = self.extract_original_datasets_from_merged(combined_data)
             
-            if ns_data is None or sf_data is None:
+            if db1_data is None or db2_data is None:
                 messagebox.showerror("Data Error", "Could not extract original datasets from merged data.")
                 self.update_status("Error extracting datasets for analysis")
                 return
             
             # In extracted datasets, we inject system Keys as canonical 'Key'
-            ns_sku_col = 'Key'
-            sf_sku_col = 'Key'
+            db1_sku_col = 'Key'
+            db2_sku_col = 'Key'
             
             # Get SKU values
-            ns_skus = set()
-            sf_skus = set()
+            db1_skus = set()
+            db2_skus = set()
             
-            if ns_sku_col in ns_data.columns:
-                ns_series = ns_data[ns_sku_col].astype(str).apply(self.clean_sku)
+            if db1_sku_col in db1_data.columns:
+                db1_series = db1_data[db1_sku_col].astype(str).apply(self.clean_sku)
                 if not self.show_empty_var.get():
-                    ns_series = ns_series[ns_series.notna() & (ns_series != '') & (ns_series != 'nan')]
-                ns_skus = set(ns_series.unique())
+                    db1_series = db1_series[db1_series.notna() & (db1_series != '') & (db1_series != 'nan')]
+                db1_skus = set(db1_series.unique())
                 # Remove None values
-                ns_skus.discard(None)
+                db1_skus.discard(None)
             
-            if sf_sku_col in sf_data.columns:
-                sf_series = sf_data[sf_sku_col].astype(str).apply(self.clean_sku)
+            if db2_sku_col in db2_data.columns:
+                db2_series = db2_data[db2_sku_col].astype(str).apply(self.clean_sku)
                 if not self.show_empty_var.get():
-                    sf_series = sf_series[sf_series.notna() & (sf_series != '') & (sf_series != 'nan')]
-                sf_skus = set(sf_series.unique())
+                    db2_series = db2_series[db2_series.notna() & (db2_series != '') & (db2_series != 'nan')]
+                db2_skus = set(db2_series.unique())
                 # Remove None values
-                sf_skus.discard(None)
+                db2_skus.discard(None)
             
             # Find unmatched items
-            ns_only_skus = ns_skus - sf_skus
-            sf_only_skus = sf_skus - ns_skus
-            matched_skus = ns_skus & sf_skus
+            db1_only_skus = db1_skus - db2_skus
+            db2_only_skus = db2_skus - db1_skus
+            matched_skus = db1_skus & db2_skus
             
             # Get full records for unmatched items
-            self.netsuite_only = self.get_netsuite_records(ns_only_skus, ns_sku_col, ns_data)
-            self.shopify_only = self.get_shopify_records(sf_only_skus, sf_sku_col, sf_data)
+            self.db1_only = self.get_db1_records(db1_only_skus, db1_sku_col, db1_data)
+            self.db2_only = self.get_db2_records(db2_only_skus, db2_sku_col, db2_data)
             
             # Update statistics
-            self.update_statistics(len(ns_skus), len(sf_skus), len(matched_skus), len(ns_only_skus), len(sf_only_skus))
+            self.update_statistics(len(db1_skus), len(db2_skus), len(matched_skus), len(db1_only_skus), len(db2_only_skus))
             
             # Populate the trees
-            self.populate_netsuite_tree()
-            self.populate_shopify_tree()
+            self.populate_db1_tree()
+            self.populate_db2_tree()
             
-            self.update_status(f"Analysis complete: {len(ns_only_skus)} NetSuite-only, {len(sf_only_skus)} Shopify-only items found")
+            self.update_status(f"Analysis complete: {len(db1_only_skus)} {self.db1_name}-only, {len(db2_only_skus)} {self.db2_name}-only items found")
             
         except Exception as e:
             self.update_status(f"Error analyzing unmatched items: {str(e)}")
@@ -402,16 +402,16 @@ class UnmatchedItemsPage:
         
         return display_value
     
-    def get_netsuite_records(self, skus, sku_column, ns_data):
-        """Get full NetSuite records for the specified SKUs."""
-        if not skus or ns_data is None or ns_data.empty:
+    def get_db1_records(self, skus, sku_column, db1_data):
+        """Get full Database 1 records for the specified SKUs."""
+        if not skus or db1_data is None or db1_data.empty:
             return pd.DataFrame()
         
-        ns_data_copy = ns_data.copy()
-        ns_data_copy['cleaned_sku'] = ns_data_copy[sku_column].astype(str).apply(self.clean_sku)
+        db1_data_copy = db1_data.copy()
+        db1_data_copy['cleaned_sku'] = db1_data_copy[sku_column].astype(str).apply(self.clean_sku)
         
         # Filter records
-        filtered = ns_data_copy[ns_data_copy['cleaned_sku'].isin(skus)]
+        filtered = db1_data_copy[db1_data_copy['cleaned_sku'].isin(skus)]
         
         # Select relevant columns
         columns_to_show = []
@@ -425,16 +425,16 @@ class UnmatchedItemsPage:
         
         return filtered[columns_to_show] if columns_to_show else filtered
     
-    def get_shopify_records(self, skus, sku_column, sf_data):
-        """Get full Shopify records for the specified SKUs."""
-        if not skus or sf_data is None or sf_data.empty:
+    def get_db2_records(self, skus, sku_column, db2_data):
+        """Get full Database 2 records for the specified SKUs."""
+        if not skus or db2_data is None or db2_data.empty:
             return pd.DataFrame()
         
-        sf_data_copy = sf_data.copy()
-        sf_data_copy['cleaned_sku'] = sf_data_copy[sku_column].astype(str).apply(self.clean_sku)
+        db2_data_copy = db2_data.copy()
+        db2_data_copy['cleaned_sku'] = db2_data_copy[sku_column].astype(str).apply(self.clean_sku)
         
         # Filter records
-        filtered = sf_data_copy[sf_data_copy['cleaned_sku'].isin(skus)]
+        filtered = db2_data_copy[db2_data_copy['cleaned_sku'].isin(skus)]
         
         # Select relevant columns
         columns_to_show = []
@@ -448,72 +448,72 @@ class UnmatchedItemsPage:
         
         return filtered[columns_to_show] if columns_to_show else filtered
     
-    def update_statistics(self, total_ns, total_sf, matched, ns_only, sf_only):
+    def update_statistics(self, total_db1, total_db2, matched, db1_only, db2_only):
         """Update the statistics display."""
-        self.stats_vars['total_netsuite'].set(str(total_ns))
-        self.stats_vars['total_shopify'].set(str(total_sf))
+        self.stats_vars['total_db1'].set(str(total_db1))
+        self.stats_vars['total_db2'].set(str(total_db2))
         self.stats_vars['matched'].set(str(matched))
-        self.stats_vars['netsuite_only'].set(str(ns_only))
-        self.stats_vars['shopify_only'].set(str(sf_only))
+        self.stats_vars['db1_only'].set(str(db1_only))
+        self.stats_vars['db2_only'].set(str(db2_only))
         
         # Calculate match rate
-        total_unique = len(set(range(total_ns)) | set(range(total_sf)))  # Simplified calculation
-        if total_ns > 0 and total_sf > 0:
-            match_rate = (matched / max(total_ns, total_sf)) * 100
+        total_unique = len(set(range(total_db1)) | set(range(total_db2)))  # Simplified calculation
+        if total_db1 > 0 and total_db2 > 0:
+            match_rate = (matched / max(total_db1, total_db2)) * 100
             self.stats_vars['match_rate'].set(f"{match_rate:.1f}%")
         else:
             self.stats_vars['match_rate'].set("0%")
     
-    def populate_netsuite_tree(self):
-        """Populate the NetSuite-only items tree."""
+    def populate_db1_tree(self):
+        """Populate the database 1-only items tree."""
         # Clear existing items
-        for item in self.netsuite_tree.get_children():
-            self.netsuite_tree.delete(item)
+        for item in self.db1_tree.get_children():
+            self.db1_tree.delete(item)
         
-        if self.netsuite_only is None or self.netsuite_only.empty:
+        if self.db1_only is None or self.db1_only.empty:
             return
         
         # Add items to tree
-        for _, row in self.netsuite_only.iterrows():
+        for _, row in self.db1_only.iterrows():
             # The SKU column is named 'Key' after extraction
             sku_value = ""
             if 'Key' in row.index:
                 sku_value = self.format_display_value(row['Key'], is_sku=True)
             
             # Insert only the SKU value
-            self.netsuite_tree.insert('', 'end', values=(sku_value,))
+            self.db1_tree.insert('', 'end', values=(sku_value,))
     
-    def populate_shopify_tree(self):
-        """Populate the Shopify-only items tree."""
+    def populate_db2_tree(self):
+        """Populate the database 2-only items tree."""
         # Clear existing items
-        for item in self.shopify_tree.get_children():
-            self.shopify_tree.delete(item)
+        for item in self.db2_tree.get_children():
+            self.db2_tree.delete(item)
         
-        if self.shopify_only is None or self.shopify_only.empty:
+        if self.db2_only is None or self.db2_only.empty:
             return
         
         # Add items to tree
-        for _, row in self.shopify_only.iterrows():
+        for _, row in self.db2_only.iterrows():
             # The SKU column is named 'Key' after extraction
             sku_value = ""
             if 'Key' in row.index:
                 sku_value = self.format_display_value(row['Key'], is_sku=True)
             
             # Insert only the SKU value
-            self.shopify_tree.insert('', 'end', values=(sku_value,))
+            self.db2_tree.insert('', 'end', values=(sku_value,))
     
-    def filter_netsuite_results(self):
-        """Filter NetSuite results based on search term."""
-        search_term = self.ns_search_var.get().lower()
+    def filter_db1_results(self):
+        """Filter database 1 results based on search term."""
+        search_term = self.db1_search_var.get().lower()
         
         # Clear and repopulate tree with filtered results
-        for item in self.netsuite_tree.get_children():
-            self.netsuite_tree.delete(item)
+        for item in self.db1_tree.get_children():
+            self.db1_tree.delete(item)
         
-        if self.netsuite_only is None or self.netsuite_only.empty:
+        if self.db1_only is None or self.db1_only.empty:
             return
         
-        for _, row in self.netsuite_only.iterrows():
+        for _, row in self.db1_only.iterrows():
             # Check if search term matches any column
             match = False
             if not search_term:  # If search is empty, show all
@@ -529,20 +529,20 @@ class UnmatchedItemsPage:
                 sku_value = self.format_display_value(row.get('Key', ''), is_sku=True)
                 
                 # Insert only the SKU value
-                self.netsuite_tree.insert('', 'end', values=(sku_value,))
+                self.db1_tree.insert('', 'end', values=(sku_value,))
     
-    def filter_shopify_results(self):
-        """Filter Shopify results based on search term."""
-        search_term = self.sf_search_var.get().lower()
+    def filter_db2_results(self):
+        """Filter database 2 results based on search term."""
+        search_term = self.db2_search_var.get().lower()
         
         # Clear and repopulate tree with filtered results
-        for item in self.shopify_tree.get_children():
-            self.shopify_tree.delete(item)
+        for item in self.db2_tree.get_children():
+            self.db2_tree.delete(item)
         
-        if self.shopify_only is None or self.shopify_only.empty:
+        if self.db2_only is None or self.db2_only.empty:
             return
         
-        for _, row in self.shopify_only.iterrows():
+        for _, row in self.db2_only.iterrows():
             # Check if search term matches any column
             match = False
             if not search_term:  # If search is empty, show all
@@ -558,16 +558,16 @@ class UnmatchedItemsPage:
                 sku_value = self.format_display_value(row.get('Key', ''), is_sku=True)
                 
                 # Insert only the SKU value
-                self.shopify_tree.insert('', 'end', values=(sku_value,))
+                self.db2_tree.insert('', 'end', values=(sku_value,))
     
     def clear_search(self, system):
         """Clear search and show all results."""
-        if system == 'netsuite':
-            self.ns_search_var.set("")
-            self.filter_netsuite_results()
+        if system == 'db1':
+            self.db1_search_var.set("")
+            self.filter_db1_results()
         else:
-            self.sf_search_var.set("")
-            self.filter_shopify_results()
+            self.db2_search_var.set("")
+            self.filter_db2_results()
     
     def export_unmatched_report(self):
         """Export unmatched items report to Excel."""
@@ -575,7 +575,7 @@ class UnmatchedItemsPage:
             from datetime import datetime
             import os
             
-            if self.netsuite_only is None and self.shopify_only is None:
+            if self.db1_only is None and self.db2_only is None:
                 messagebox.showwarning("No Data", "No unmatched items data to export.")
                 return
             
@@ -590,23 +590,23 @@ class UnmatchedItemsPage:
             # Create Excel writer
             with pd.ExcelWriter(filename, engine='openpyxl') as writer:
                 
-                # Export NetSuite-only items
-                if self.netsuite_only is not None and not self.netsuite_only.empty:
-                    self.netsuite_only.to_excel(writer, sheet_name='NetSuite Only', index=False)
+                # Export Database 1-only items
+                if self.db1_only is not None and not self.db1_only.empty:
+                    self.db1_only.to_excel(writer, sheet_name=f'{self.db1_name} Only', index=False)
                 
-                # Export Shopify-only items
-                if self.shopify_only is not None and not self.shopify_only.empty:
-                    self.shopify_only.to_excel(writer, sheet_name='Shopify Only', index=False)
+                # Export Database 2-only items
+                if self.db2_only is not None and not self.db2_only.empty:
+                    self.db2_only.to_excel(writer, sheet_name=f'{self.db2_name} Only', index=False)
                 
                 # Create summary sheet
                 summary_data = {
-                    'Metric': ['Total NetSuite Items', 'Total Shopify Items', 'Matched Items', 'NetSuite Only', 'Shopify Only', 'Match Rate'],
+                    'Metric': [f'Total {self.db1_name} Items', f'Total {self.db2_name} Items', 'Matched Items', f'{self.db1_name} Only', f'{self.db2_name} Only', 'Match Rate'],
                     'Value': [
-                        self.stats_vars['total_netsuite'].get(),
-                        self.stats_vars['total_shopify'].get(),
+                        self.stats_vars['total_db1'].get(),
+                        self.stats_vars['total_db2'].get(),
                         self.stats_vars['matched'].get(),
-                        self.stats_vars['netsuite_only'].get(),
-                        self.stats_vars['shopify_only'].get(),
+                        self.stats_vars['db1_only'].get(),
+                        self.stats_vars['db2_only'].get(),
                         self.stats_vars['match_rate'].get()
                     ]
                 }

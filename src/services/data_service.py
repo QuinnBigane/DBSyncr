@@ -9,23 +9,23 @@ from datetime import datetime
 import json
 from pathlib import Path
 
-from src.models.data_models import (
+from models.data_models import (
     DatabaseRecord, CombinedRecord, UnmatchedAnalysis,
     FieldMappingsConfig, FieldMapping, DataSource
 )
-from src.utils.exceptions import (
+from utils.exceptions import (
     DataValidationError, FileNotFoundError, DataProcessingError, MappingError
 )
-from src.utils.logging_config import get_logger
-from src.config.settings import config_manager
+from utils.logging_config import get_logger
+from config.settings import config_manager
 
 
 class DataService:
     """Service class for handling all data operations."""
-    
-    def __init__(self):
-        self.logger = get_logger("DataService")
-        self.config_manager = config_manager
+
+    def __init__(self, config_manager=None, logger=None):
+        self.logger = logger or get_logger("DataService")
+        self.config_manager = config_manager or config_manager
         
         # Data storage
         self.db1_data: Optional[pd.DataFrame] = None
@@ -61,11 +61,15 @@ class DataService:
         """Ensure required directories exist."""
         directories = [
             self.config_manager.settings.data_dir,
-            self.config_manager.settings.input_dir,
-            self.config_manager.settings.output_dir,
-            self.config_manager.settings.exports_dir,
-            self.config_manager.settings.backups_dir,
-            self.config_manager.settings.logs_dir
+            self.config_manager.settings.api_input_dir,
+            self.config_manager.settings.api_output_dir,
+            self.config_manager.settings.api_config_dir,
+            self.config_manager.settings.dev_input_dir,
+            self.config_manager.settings.dev_output_dir,
+            self.config_manager.settings.dev_samples_dir,
+            self.config_manager.settings.config_dir,
+            self.config_manager.settings.logs_dir,
+            self.config_manager.settings.backups_dir
         ]
         
         for directory in directories:
@@ -132,20 +136,20 @@ class DataService:
             raise DataProcessingError(f"Data loading failed: {e}")
     
     def _load_file(self, file_path: str) -> pd.DataFrame:
-        """Load data from a single file (Excel or CSV)."""
+        """Load data from a single file (Excel or CSV), always lowercasing columns."""
         file_path = Path(file_path)
-        
         if not file_path.exists():
             raise DataProcessingError(f"File not found: {file_path}")
-        
         try:
             if file_path.suffix.lower() in ['.xlsx', '.xls']:
-                return pd.read_excel(file_path)
+                df = pd.read_excel(file_path)
             elif file_path.suffix.lower() == '.csv':
-                return pd.read_csv(file_path)
+                df = pd.read_csv(file_path)
             else:
                 raise DataProcessingError(f"Unsupported file format: {file_path.suffix}")
-                
+            # Always lowercase columns for robust downstream access
+            df.columns = [col.lower() for col in df.columns]
+            return df
         except Exception as e:
             if "No data" in str(e):
                 raise DataProcessingError(f"Error reading file {file_path}: {e}")
@@ -156,16 +160,32 @@ class DataService:
         """Combine database data based on linking configuration."""
         if not self.field_mappings:
             raise MappingError("Field mappings not loaded")
-        
         try:
             # Get linking fields
             db1_key = self.field_mappings.primary_link.db1
             db2_key = self.field_mappings.primary_link.db2
-            
-            # Normalize keys for matching
+
+            # Create normalized column name mappings that handle spaces consistently
+            def normalize_column_name(col_name):
+                """Normalize column name for consistent matching, preserving spaces as underscores."""
+                return str(col_name).lower().replace(' ', '_')
+
+            # Normalize DataFrame column names
             db1_data = self.db1_data.copy()
             db2_data = self.db2_data.copy()
             
+            # Create column name mappings
+            db1_col_mapping = {col: normalize_column_name(col) for col in db1_data.columns}
+            db2_col_mapping = {col: normalize_column_name(col) for col in db2_data.columns}
+            
+            # Apply normalization to column names
+            db1_data.columns = [db1_col_mapping[col] for col in db1_data.columns]
+            db2_data.columns = [db2_col_mapping[col] for col in db2_data.columns]
+            
+            # Normalize the key field names the same way
+            db1_key_normalized = normalize_column_name(db1_key)
+            db2_key_normalized = normalize_column_name(db2_key)
+
             # Create normalized keys for matching - handle float vs int issue
             def normalize_key(value):
                 """Normalize a key for consistent matching."""
@@ -176,70 +196,66 @@ class DataService:
                 if str_value.endswith('.0'):
                     str_value = str_value[:-2]
                 return str_value
-            
-            db1_data['NormalizedKey'] = db1_data[db1_key].apply(normalize_key)
-            db2_data['NormalizedKey'] = db2_data[db2_key].apply(normalize_key)
-            
+
+            db1_data['NormalizedKey'] = db1_data[db1_key_normalized].apply(normalize_key)
+            db2_data['NormalizedKey'] = db2_data[db2_key_normalized].apply(normalize_key)
+
             # Remove duplicates based on NormalizedKey (keep first occurrence)
             db1_initial_count = len(db1_data)
             db2_initial_count = len(db2_data)
-            
+
             db1_data = db1_data.drop_duplicates(subset=['NormalizedKey'], keep='first')
             db2_data = db2_data.drop_duplicates(subset=['NormalizedKey'], keep='first')
-            
+
             if len(db1_data) != db1_initial_count:
                 self.logger.warning(f"{self.db1_name}: Removed {db1_initial_count - len(db1_data)} duplicate keys")
             if len(db2_data) != db2_initial_count:
                 self.logger.warning(f"{self.db2_name}: Removed {db2_initial_count - len(db2_data)} duplicate keys")
-            
+
             # Add database prefixes to columns (including renaming the key fields)
-            db1_cols = {col: f"{self.db1_name}_{col}" for col in db1_data.columns if col not in ['NormalizedKey', db1_key]}
-            db1_cols[db1_key] = f"{self.db1_name}_Key"
+            db1_cols = {col: f"{self.db1_name}_{col}" for col in db1_data.columns if col not in ['NormalizedKey', db1_key_normalized]}
+            db1_cols[db1_key_normalized] = f"{self.db1_name}_Key"
             db1_data = db1_data.rename(columns=db1_cols)
-            
-            db2_cols = {col: f"{self.db2_name}_{col}" for col in db2_data.columns if col not in ['NormalizedKey', db2_key]}
-            db2_cols[db2_key] = f"{self.db2_name}_Key"
+
+            db2_cols = {col: f"{self.db2_name}_{col}" for col in db2_data.columns if col not in ['NormalizedKey', db2_key_normalized]}
+            db2_cols[db2_key_normalized] = f"{self.db2_name}_Key"
             db2_data = db2_data.rename(columns=db2_cols)
-            
+
             # Perform outer join on the common NormalizedKey
             self.combined_data = pd.merge(
                 db1_data, db2_data,
                 on='NormalizedKey',
                 how='outer'
             )
-            
+
             self.logger.info(f"Combined data created: {len(self.combined_data)} records")
-            
+
         except Exception as e:
             self.logger.error(f"Failed to combine data: {e}")
             raise DataProcessingError(f"Data combination failed: {e}")
     
     def _save_output_files(self):
         """Save processed data to output files."""
-        output_dir = self.config_manager.get_absolute_path(self.config_manager.settings.output_dir)
-        
+        output_dir = self.config_manager.get_absolute_path(self.config_manager.settings.api_output_dir)
+        # Ensure the output directory exists
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
         try:
             # Save individual datasets
             if self.db1_data is not None:
                 db1_path = output_dir / f"{self.db1_name}Data.csv"
                 self.db1_data.to_csv(db1_path, index=False)
-            
             if self.db2_data is not None:
                 db2_path = output_dir / f"{self.db2_name}Data.csv"
                 self.db2_data.to_csv(db2_path, index=False)
-            
             # Save combined data
             if self.combined_data is not None:
                 combined_path = output_dir / "CombinedData.csv"
                 self.combined_data.to_csv(combined_path, index=False)
-                
                 # Save timestamped version (disabled for debug cleanup)
                 # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 # timestamped_path = output_dir / f"combined_{timestamp}.csv"
                 # self.combined_data.to_csv(timestamped_path, index=False)
-            
             self.logger.info("Output files saved successfully")
-            
         except Exception as e:
             self.logger.error(f"Failed to save output files: {e}")
             raise DataProcessingError(f"Output file saving failed: {e}")
@@ -335,13 +351,13 @@ class DataService:
             
             # Generate file path if not provided
             if not file_path:
-                exports_dir = self.config_manager.get_absolute_path(self.config_manager.settings.exports_dir)
+                exports_dir = self.config_manager.get_absolute_path(self.config_manager.settings.api_output_dir)
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = f"{default_name}_{timestamp}.{format}"
                 file_path = str(exports_dir / filename)
             elif not os.path.isabs(file_path):
                 # Make relative paths absolute
-                exports_dir = self.config_manager.get_absolute_path(self.config_manager.settings.exports_dir)
+                exports_dir = self.config_manager.get_absolute_path(self.config_manager.settings.api_output_dir)
                 file_path = str(exports_dir / file_path)
             
             # Export based on format
@@ -421,3 +437,242 @@ class DataService:
         }
         
         return summary
+
+    # GUI compatibility methods
+    def load_data(self) -> Tuple[bool, str]:
+        """Load data using the service layer (GUI compatibility)."""
+        try:
+            success = self.load_data_from_files()
+            if success:
+                return True, "Data loaded successfully"
+            else:
+                return False, "Failed to load data"
+        except Exception as e:
+            self.logger.error(f"Failed to load data: {e}")
+            return False, f"Error loading data: {str(e)}"
+
+    def get_database_names(self) -> Tuple[str, str]:
+        """Get database names."""
+        return self.db1_name, self.db2_name
+
+    def get_primary_link_field(self) -> Tuple[str, str]:
+        """Get primary link fields for Database 1 and Database 2."""
+        if self.field_mappings and self.field_mappings.primary_link:
+            return (self.field_mappings.primary_link.db1,
+                   self.field_mappings.primary_link.db2)
+        return ("ID", "ID")
+
+    def is_primary_link_configured(self) -> bool:
+        """Check if primary link is configured."""
+        return (self.field_mappings is not None and
+                self.field_mappings.primary_link is not None)
+
+    def get_combined_data(self):
+        """Get combined data DataFrame."""
+        return self.combined_data
+
+    def update_linking_field(self, db1_field: str, db2_field: str) -> bool:
+        """Update primary linking fields."""
+        try:
+            if not self.field_mappings:
+                return False
+
+            self.field_mappings.primary_link.db1 = db1_field
+            self.field_mappings.primary_link.db2 = db2_field
+
+            # Save to file
+            mappings_dict = self.field_mappings.dict()
+            self.config_manager.save_field_mappings(mappings_dict)
+
+            self.logger.info("Primary linking fields updated successfully")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to update linking field: {e}")
+            return False
+
+    def update_database_names(self, db1_name: str, db2_name: str) -> bool:
+        """Update database names."""
+        try:
+            if not self.field_mappings:
+                return False
+
+            self.field_mappings.database_names.db1_name = db1_name
+            self.field_mappings.database_names.db2_name = db2_name
+
+            # Update local variables
+            self.db1_name = db1_name
+            self.db2_name = db2_name
+
+            # Save to file
+            mappings_dict = self.field_mappings.dict()
+            self.config_manager.save_field_mappings(mappings_dict)
+
+            self.logger.info("Database names updated successfully")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to update database names: {e}")
+            return False
+
+    def get_available_db1_fields(self) -> List[str]:
+        """Get available database 1 fields."""
+        if self.db1_data is not None:
+            return list(self.db1_data.columns)
+        return []
+
+    def get_available_db2_fields(self) -> List[str]:
+        """Get available database 2 fields."""
+        if self.db2_data is not None:
+            return list(self.db2_data.columns)
+        return []
+
+    def get_linking_configuration(self) -> Dict[str, Any]:
+        """Get linking configuration."""
+        if self.field_mappings and self.field_mappings.primary_link:
+            return {
+                "primary_link": {
+                    "db1": self.field_mappings.primary_link.db1,
+                    "db2": self.field_mappings.primary_link.db2
+                }
+            }
+        return {}
+
+    def configure_data_sources(self, db1_file: str, db2_file: str) -> Tuple[bool, str]:
+        """Configure data sources."""
+        try:
+            if not self.field_mappings:
+                return False, "Field mappings not loaded"
+
+            # Update the data sources
+            from models.data_models import DataSource
+            self.field_mappings.data_sources = {
+                "db1": DataSource(
+                    file_path=db1_file,
+                    file_type="excel" if db1_file.endswith(('.xlsx', '.xls')) else "csv",
+                    name=self.db1_name,
+                    description=f"{self.db1_name} data source"
+                ),
+                "db2": DataSource(
+                    file_path=db2_file,
+                    file_type="excel" if db2_file.endswith(('.xlsx', '.xls')) else "csv",
+                    name=self.db2_name,
+                    description=f"{self.db2_name} data source"
+                )
+            }
+
+            # Save configuration
+            mappings_dict = self.field_mappings.dict()
+            self.config_manager.save_field_mappings(mappings_dict)
+
+            # Load the data
+            success = self.load_data_from_files(db1_file, db2_file)
+
+            if success:
+                return True, "Data sources configured and saved successfully"
+            else:
+                return False, "Failed to configure data sources"
+
+        except Exception as e:
+            self.logger.error(f"Failed to configure data sources: {e}")
+            return False, f"Error: {str(e)}"
+
+    def get_configured_data_sources(self) -> Tuple[Optional[str], Optional[str]]:
+        """Get configured data source paths."""
+        if self.field_mappings and self.field_mappings.data_sources:
+            db1_source = self.field_mappings.data_sources.get('db1')
+            db2_source = self.field_mappings.data_sources.get('db2')
+
+            return (
+                db1_source.file_path if db1_source else None,
+                db2_source.file_path if db2_source else None
+            )
+        return None, None
+
+    def add_field_mapping(self, db1_field: str, db2_field: str, description: str = "") -> bool:
+        """Add a new field mapping."""
+        try:
+            if not self.field_mappings:
+                return False
+
+            from models.data_models import FieldMapping
+            import uuid
+
+            # Generate a unique name
+            mapping_name = f"{db1_field}_to_{db2_field}_{str(uuid.uuid4())[:8]}"
+
+            self.field_mappings.field_mappings[mapping_name] = FieldMapping(
+                db1_field=db1_field,
+                db2_field=db2_field,
+                direction="bidirectional",
+                description=description
+            )
+
+            # Save to file
+            mappings_dict = self.field_mappings.dict()
+            self.config_manager.save_field_mappings(mappings_dict)
+
+            self.logger.info(f"Field mapping added: {mapping_name}")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to add field mapping: {e}")
+            return False
+
+    def remove_field_mapping(self, db1_field: str, db2_field: str) -> bool:
+        """Remove a field mapping by fields."""
+        try:
+            if not self.field_mappings:
+                return False
+
+            # Find mapping by fields
+            to_remove = None
+            for name, mapping in self.field_mappings.field_mappings.items():
+                if (mapping.db1_field == db1_field and
+                    mapping.db2_field == db2_field):
+                    to_remove = name
+                    break
+
+            if to_remove:
+                del self.field_mappings.field_mappings[to_remove]
+
+                # Save to file
+                mappings_dict = self.field_mappings.dict()
+                self.config_manager.save_field_mappings(mappings_dict)
+
+                self.logger.info(f"Field mapping removed: {to_remove}")
+                return True
+
+            return False
+
+        except Exception as e:
+            self.logger.error(f"Failed to remove field mapping: {e}")
+            return False
+
+    def clear_all_field_mappings(self) -> bool:
+        """Clear all field mappings."""
+        try:
+            if not self.field_mappings:
+                return False
+
+            self.field_mappings.field_mappings = {}
+
+            # Save to file
+            mappings_dict = self.field_mappings.dict()
+            self.config_manager.save_field_mappings(mappings_dict)
+
+            self.logger.info("All field mappings cleared")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to clear field mappings: {e}")
+            return False
+
+    def load_mappings(self) -> bool:
+        """Load mappings configuration."""
+        try:
+            self._load_configuration()
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to load mappings: {e}")
+            return False

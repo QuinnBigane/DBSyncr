@@ -6,6 +6,7 @@ import pytest
 import httpx
 import asyncio
 import os
+import sys
 import time
 import pandas as pd
 import json
@@ -18,54 +19,36 @@ import threading
 class TestDBSyncrAPIWorkflow:
     """Integration tests for the complete DBSyncr workflow."""
     
-    BASE_URL = "http://localhost:8000"
-    API_PREFIX = "/api/v1"
-    
     @classmethod
     def setup_class(cls):
-        """Start the API server before running tests."""
-        cls.server_process = None
-        cls._start_api_server()
-        cls._wait_for_server()
-    
-    @classmethod
-    def teardown_class(cls):
-        """Stop the API server after tests."""
-        if cls.server_process:
-            cls.server_process.terminate()
-            cls.server_process.wait()
-    
-    @classmethod
-    def _start_api_server(cls):
-        """Start the API server in a separate process."""
-        # Change to the project directory
-        project_dir = Path(__file__).parent.parent
-        os.chdir(project_dir)
-        
-        # Start the server using the main.py API mode
-        cls.server_process = subprocess.Popen([
-            "C:/Users/Quinn/AppData/Local/Microsoft/WindowsApps/python3.13.exe",
-            "-c",
-            "from src.api.main import app; import uvicorn; uvicorn.run(app, host='0.0.0.0', port=8000, log_level='info')"
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    
-    @classmethod 
-    def _wait_for_server(cls):
-        """Wait for the API server to be ready."""
-        max_attempts = 30
-        for attempt in range(max_attempts):
-            try:
-                response = httpx.get(f"{cls.BASE_URL}/health", timeout=5.0)
-                if response.status_code == 200:
-                    print("API server is ready!")
-                    return
-            except Exception:
-                pass
-            
-            time.sleep(1)
-            print(f"Waiting for server... attempt {attempt + 1}/{max_attempts}")
-        
-        raise RuntimeError("API server failed to start within 30 seconds")
+        """Set up test client with DI registration before app import."""
+        # Add src to path for imports
+        project_root = Path(__file__).parent.parent
+        src_path = project_root / "src"
+        if str(src_path) not in sys.path:
+            sys.path.insert(0, str(src_path))
+
+        # Import DI and ServiceFactory
+        from src.services.data_service import DataService
+        from src.config.settings import config_manager
+        from src.utils.logging_config import get_logger
+        from src.utils.dependency_injection import get_container, register_instance
+        from src.services.service_factory import ServiceFactory
+
+        # Clear DI container and ServiceFactory cache
+        get_container().clear()
+        ServiceFactory.clear_cache()
+
+        # Register DataService in DI container BEFORE importing app
+        instance = DataService(config_manager=config_manager, logger=get_logger("DataService"))
+        register_instance(DataService, instance)
+
+        # Now import app and create test client
+        from fastapi.testclient import TestClient
+        from src.api import main as api_main
+        cls.client = TestClient(api_main.app)
+        cls.BASE_URL = ""  # Not needed for TestClient
+        cls.API_PREFIX = "/api/v1"
     
     def test_full_workflow(self):
         """
@@ -76,7 +59,7 @@ class TestDBSyncrAPIWorkflow:
         3. Pull down the output db of db1 and db2
         """
         # Test data files
-        test_data_dir = Path(__file__).parent / "test_data"
+        test_data_dir = Path(__file__).parent.parent / "test_data"
         db1_file = test_data_dir / "db1_5_items.csv"
         db2_file = test_data_dir / "db2_10_items.csv"
         test_mappings_file = test_data_dir / "test_field_mappings.json"
@@ -85,15 +68,31 @@ class TestDBSyncrAPIWorkflow:
         assert db2_file.exists(), f"Test data file not found: {db2_file}"
         assert test_mappings_file.exists(), f"Test mappings file not found: {test_mappings_file}"
         
-        with httpx.Client(timeout=30.0) as client:
+        with self.client as client:
+            # Login with default admin user
+            login_data = {
+                "username": "admin",
+                "password": "admin123"
+            }
+            response = client.post(
+                "/api/v1/auth/login",
+                json=login_data
+            )
+            assert response.status_code == 200, f"Login failed: {response.text}"
+            auth_response = response.json()
+            access_token = auth_response["access_token"]
+            headers = {"Authorization": f"Bearer {access_token}"}
+            print("✓ Authentication successful")
+            
             # Step 0: Update field mappings for our test data
             print("Step 0: Updating field mappings for test data...")
             with open(test_mappings_file, 'r') as f:
                 test_mappings = json.load(f)
             
             response = client.put(
-                f"{self.BASE_URL}{self.API_PREFIX}/mappings",
-                json=test_mappings
+                f"{self.API_PREFIX}/mappings",
+                json=test_mappings,
+                headers=headers
             )
             assert response.status_code == 200, f"Field mappings update failed: {response.text}"
             update_response = response.json()
@@ -105,7 +104,8 @@ class TestDBSyncrAPIWorkflow:
             with open(db1_file, "rb") as f:
                 response = client.post(
                     f"{self.BASE_URL}{self.API_PREFIX}/data/upload/db1",
-                    files={"file": ("db1_5_items.csv", f, "text/csv")}
+                    files={"file": ("db1_5_items.csv", f, "text/csv")},
+                    headers=headers
                 )
             
             assert response.status_code == 200, f"DB1 upload failed: {response.text}"
@@ -119,7 +119,8 @@ class TestDBSyncrAPIWorkflow:
             with open(db2_file, "rb") as f:
                 response = client.post(
                     f"{self.BASE_URL}{self.API_PREFIX}/data/upload/db2",
-                    files={"file": ("db2_10_items.csv", f, "text/csv")}
+                    files={"file": ("db2_10_items.csv", f, "text/csv")},
+                    headers=headers
                 )
             
             assert response.status_code == 200, f"DB2 upload failed: {response.text}"
@@ -132,7 +133,7 @@ class TestDBSyncrAPIWorkflow:
             print("Step 3: Verifying data was loaded and synced...")
             
             # Check DB1 data
-            response = client.get(f"{self.BASE_URL}{self.API_PREFIX}/data/db1")
+            response = client.get(f"{self.BASE_URL}{self.API_PREFIX}/data/db1", headers=headers)
             assert response.status_code == 200, f"Failed to get DB1 data: {response.text}"
             db1_data = response.json()
             assert db1_data["success"] is True
@@ -140,7 +141,7 @@ class TestDBSyncrAPIWorkflow:
             print(f"✓ Database 1 has {len(db1_data['data'])} items")
             
             # Check DB2 data  
-            response = client.get(f"{self.BASE_URL}{self.API_PREFIX}/data/db2")
+            response = client.get(f"{self.BASE_URL}{self.API_PREFIX}/data/db2", headers=headers)
             assert response.status_code == 200, f"Failed to get DB2 data: {response.text}"
             db2_data = response.json()
             assert db2_data["success"] is True
@@ -149,7 +150,7 @@ class TestDBSyncrAPIWorkflow:
             
             # Check combined data (sync result) - this might fail due to NaN values
             try:
-                response = client.get(f"{self.BASE_URL}{self.API_PREFIX}/data/combined")
+                response = client.get(f"{self.BASE_URL}{self.API_PREFIX}/data/combined", headers=headers)
                 if response.status_code == 200:
                     combined_data = response.json()
                     if combined_data["success"]:
@@ -172,7 +173,8 @@ class TestDBSyncrAPIWorkflow:
             }
             response = client.post(
                 f"{self.BASE_URL}{self.API_PREFIX}/export",
-                json=export_request
+                json=export_request,
+                headers=headers
             )
             assert response.status_code == 200, f"DB1 export failed: {response.text}"
             export_response = response.json()
@@ -188,7 +190,8 @@ class TestDBSyncrAPIWorkflow:
             }
             response = client.post(
                 f"{self.BASE_URL}{self.API_PREFIX}/export",
-                json=export_request
+                json=export_request,
+                headers=headers
             )
             assert response.status_code == 200, f"DB2 export failed: {response.text}"
             export_response = response.json()
@@ -204,7 +207,8 @@ class TestDBSyncrAPIWorkflow:
             }
             response = client.post(
                 f"{self.BASE_URL}{self.API_PREFIX}/export",
-                json=export_request
+                json=export_request,
+                headers=headers
             )
             assert response.status_code == 200, f"Combined export failed: {response.text}"
             export_response = response.json()
@@ -216,7 +220,7 @@ class TestDBSyncrAPIWorkflow:
             print("Step 5: Downloading and verifying exported files...")
             
             # Download and verify DB1 export
-            response = client.get(f"{self.BASE_URL}{self.API_PREFIX}/export/download/{db1_export_filename}")
+            response = client.get(f"{self.BASE_URL}{self.API_PREFIX}/export/download/{db1_export_filename}", headers=headers)
             assert response.status_code == 200, f"Failed to download DB1 export: {response.text}"
             db1_content = response.content.decode('utf-8')
             db1_lines = db1_content.strip().split('\n')
@@ -224,7 +228,7 @@ class TestDBSyncrAPIWorkflow:
             print(f"✓ Downloaded DB1 export: {len(db1_lines) - 1} data rows")
             
             # Download and verify DB2 export
-            response = client.get(f"{self.BASE_URL}{self.API_PREFIX}/export/download/{db2_export_filename}")
+            response = client.get(f"{self.BASE_URL}{self.API_PREFIX}/export/download/{db2_export_filename}", headers=headers)
             assert response.status_code == 200, f"Failed to download DB2 export: {response.text}"
             db2_content = response.content.decode('utf-8')
             db2_lines = db2_content.strip().split('\n')
@@ -232,7 +236,7 @@ class TestDBSyncrAPIWorkflow:
             print(f"✓ Downloaded DB2 export: {len(db2_lines) - 1} data rows")
             
             # Download and verify combined export
-            response = client.get(f"{self.BASE_URL}{self.API_PREFIX}/export/download/{combined_export_filename}")
+            response = client.get(f"{self.BASE_URL}{self.API_PREFIX}/export/download/{combined_export_filename}", headers=headers)
             assert response.status_code == 200, f"Failed to download combined export: {response.text}"
             combined_content = response.content.decode('utf-8')
             combined_lines = combined_content.strip().split('\n')
@@ -243,8 +247,22 @@ class TestDBSyncrAPIWorkflow:
     
     def test_data_summary(self):
         """Test that we can get a summary of the loaded data."""
-        with httpx.Client(timeout=10.0) as client:
-            response = client.get(f"{self.BASE_URL}{self.API_PREFIX}/data/summary")
+        with self.client as client:
+            # Login first
+            login_data = {
+                "username": "testuser",
+                "password": "testpassword123"
+            }
+            response = client.post(
+                f"{self.API_PREFIX}/auth/login",
+                json=login_data
+            )
+            assert response.status_code == 200, f"Login failed: {response.text}"
+            auth_response = response.json()
+            access_token = auth_response["access_token"]
+            headers = {"Authorization": f"Bearer {access_token}"}
+            
+            response = client.get(f"{self.API_PREFIX}/data/summary", headers=headers)
             assert response.status_code == 200, f"Failed to get data summary: {response.text}"
             
             summary_response = response.json()
@@ -268,8 +286,8 @@ class TestDBSyncrAPIWorkflow:
     
     def test_health_check(self):
         """Test that the health check endpoint works."""
-        with httpx.Client(timeout=5.0) as client:
-            response = client.get(f"{self.BASE_URL}/health")
+        with self.client as client:
+            response = client.get("/health")
             assert response.status_code == 200, f"Health check failed: {response.text}"
             
             health_response = response.json()

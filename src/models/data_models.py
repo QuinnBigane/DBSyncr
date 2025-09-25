@@ -2,7 +2,87 @@
 Data Models for DBSyncr
 """
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, ConfigDict, field_validator
+from datetime import datetime
+from enum import Enum
+
+
+class UserRole(str, Enum):
+    """User role enumeration."""
+    ADMIN = "admin"
+    USER = "user"
+    GUEST = "guest"
+
+
+class User(BaseModel):
+    """User model for authentication."""
+    id: Optional[str] = None
+    username: str
+    email: str
+    full_name: Optional[str] = None
+    disabled: bool = False
+    role: UserRole = UserRole.USER
+    created_at: Optional[datetime] = None
+    hashed_password: Optional[str] = None
+
+
+class UserCreate(BaseModel):
+    """User creation model."""
+    username: str
+    email: str
+    full_name: Optional[str] = None
+    password: str
+    role: UserRole = UserRole.USER
+
+
+class TokenData(BaseModel):
+    """Token data model."""
+    username: Optional[str] = None
+    role: Optional[UserRole] = None
+
+
+class Token(BaseModel):
+    """Token response model."""
+    access_token: str
+    token_type: str = "bearer"
+
+
+class LoginRequest(BaseModel):
+    """Login request model."""
+    username: str
+    password: str
+
+
+class PasswordChange(BaseModel):
+    """Password change model."""
+    current_password: str
+    new_password: str
+
+
+class ApiSessionStatus(str, Enum):
+    """Status for API session lifecycle."""
+    CREATED = "created"
+    ACTIVE = "active"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
+class ApiSession(BaseModel):
+    """API session model for tracking uploads and processing."""
+    session_id: str
+    status: ApiSessionStatus = ApiSessionStatus.CREATED
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    client_info: Optional[Dict[str, Any]] = None
+    files: List[str] = []
+    metadata: Dict[str, Any] = {}
+"""
+Data Models for DBSyncr
+"""
+from typing import Optional, Dict, Any, List
+from pydantic import BaseModel, Field, validator, ConfigDict, field_validator
 from datetime import datetime
 from enum import Enum
 
@@ -75,7 +155,10 @@ class DatabaseRecord(DataRecord):
     price: Optional[float] = Field(None, alias="Price")
     cost: Optional[float] = Field(None, alias="Cost")
     
-    @validator('weight', 'price', 'cost', pre=True)
+    model_config = ConfigDict(populate_by_name=True)
+    
+    @field_validator('weight', 'price', 'cost', mode='before')
+    @classmethod
     def parse_numeric(cls, v):
         if v is None or v == '':
             return None
